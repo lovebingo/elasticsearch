@@ -31,7 +31,7 @@ import java.lang.annotation.Annotation;
  * used to create an {@link Injector}. Guice provides this object to your
  * application's {@link Module} implementors so they may each contribute
  * their own bindings and other registrations.
- * <h3>The Guice Binding EDSL</h3>
+ * <h2>The Guice Binding EDSL</h2>
  * <p>
  * Guice uses an <i>embedded domain-specific language</i>, or EDSL, to help you
  * create bindings simply and readably.  This approach is great for overall
@@ -360,7 +360,7 @@ public interface Binder {
      * @return a binder that shares its configuration with this binder.
      * @since 2.0
      */
-    Binder skipSources(Class... classesToSkip);
+    Binder skipSources(Class<?>... classesToSkip);
 
     /**
      * Creates a new private child environment for bindings and other configuration. The returned

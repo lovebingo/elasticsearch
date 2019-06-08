@@ -19,7 +19,6 @@ package org.elasticsearch.common.inject.assistedinject;
 import org.elasticsearch.common.inject.ConfigurationException;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.inject.Injector;
-import org.elasticsearch.common.inject.Key;
 import org.elasticsearch.common.inject.Provider;
 import org.elasticsearch.common.inject.TypeLiteral;
 import org.elasticsearch.common.inject.internal.Errors;
@@ -27,27 +26,20 @@ import org.elasticsearch.common.inject.spi.Dependency;
 import org.elasticsearch.common.inject.spi.HasDependencies;
 import org.elasticsearch.common.inject.spi.Message;
 
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static java.util.Collections.emptyMap;
 import static java.util.Collections.singleton;
 import static java.util.Collections.unmodifiableSet;
 
 /**
  * Provides a factory that combines the caller's arguments with injector-supplied values to
  * construct objects.
- * <h3>Defining a factory</h3>
+ * <h2>Defining a factory</h2>
  * Create an interface whose methods return the constructed type, or any of its supertypes. The
  * method's parameters are the arguments required to build the constructed type.
  * <pre>public interface PaymentFactory {

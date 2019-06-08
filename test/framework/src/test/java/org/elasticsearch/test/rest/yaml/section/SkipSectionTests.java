@@ -34,17 +34,17 @@ import static org.hamcrest.Matchers.nullValue;
 public class SkipSectionTests extends AbstractClientYamlTestFragmentParserTestCase {
 
     public void testSkip() {
-        SkipSection section = new SkipSection("5.0.0 - 5.1.0",
+        SkipSection section = new SkipSection("6.0.0 - 6.1.0",
                 randomBoolean() ? Collections.emptyList() : Collections.singletonList("warnings"), "foobar");
         assertFalse(section.skip(Version.CURRENT));
-        assertTrue(section.skip(Version.V_5_0_0));
-        section = new SkipSection(randomBoolean() ? null : "5.0.0 - 5.1.0",
+        assertTrue(section.skip(Version.fromString("6.0.0")));
+        section = new SkipSection(randomBoolean() ? null : "6.0.0 - 6.1.0",
                 Collections.singletonList("boom"), "foobar");
         assertTrue(section.skip(Version.CURRENT));
     }
 
     public void testMessage() {
-        SkipSection section = new SkipSection("5.0.0 - 5.1.0",
+        SkipSection section = new SkipSection("6.0.0 - 6.1.0",
                 Collections.singletonList("warnings"), "foobar");
         assertEquals("[FOOBAR] skipped, reason: [foobar] unsupported features [warnings]", section.getSkipMessage("FOOBAR"));
         section = new SkipSection(null, Collections.singletonList("warnings"), "foobar");
@@ -54,15 +54,16 @@ public class SkipSectionTests extends AbstractClientYamlTestFragmentParserTestCa
     }
 
     public void testParseSkipSectionVersionNoFeature() throws Exception {
+        Version version = VersionUtils.randomVersion(random());
         parser = createParser(YamlXContent.yamlXContent,
-                "version:     \" - 5.1.1\"\n" +
+                "version:     \" - " + version + "\"\n" +
                 "reason:      Delete ignores the parent param"
         );
 
         SkipSection skipSection = SkipSection.parse(parser);
         assertThat(skipSection, notNullValue());
         assertThat(skipSection.getLowerVersion(), equalTo(VersionUtils.getFirstVersion()));
-        assertThat(skipSection.getUpperVersion(), equalTo(Version.V_5_1_1));
+        assertThat(skipSection.getUpperVersion(), equalTo(version));
         assertThat(skipSection.getFeatures().size(), equalTo(0));
         assertThat(skipSection.getReason(), equalTo("Delete ignores the parent param"));
     }

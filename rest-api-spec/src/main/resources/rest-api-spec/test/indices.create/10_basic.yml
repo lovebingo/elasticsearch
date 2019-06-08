@@ -6,16 +6,17 @@
         index: test_index
         body:
           mappings:
-            type_1: {}
+            {}
 
   - do:
       indices.get_mapping:
         index: test_index
 
-  - is_true: test_index.mappings.type_1
+  - is_true: test_index.mappings
 
 ---
 "Create index with settings":
+
 
   - do:
       indices.create:
@@ -62,10 +63,9 @@
         index: test_index
         body:
           mappings:
-            type_1:
-              properties:
-                field:
-                  type: text
+            properties:
+              field:
+                type: text
           aliases:
             test_alias: {}
             test_blias:
@@ -79,7 +79,6 @@
       indices.get_alias:
         index: test_index
 
-  - match: {test_index.aliases.test_alias: {}}
   - match: {test_index.aliases.test_blias.search_routing: b}
   - match: {test_index.aliases.test_blias.index_routing: b}
   - is_false: test_index.aliases.test_blias.filter
@@ -88,14 +87,26 @@
   - is_false: test_index.aliases.test_clias.search_routing
 
 ---
-"Create index with no type mappings":
+"Create index with write aliases":
+
   - do:
-      catch: /illegal_argument_exception/
       indices.create:
         index: test_index
         body:
-          mappings:
-           "" : {}
+          aliases:
+            test_alias: {}
+            test_blias:
+              is_write_index: false
+            test_clias:
+              is_write_index: true
+
+  - do:
+      indices.get_alias:
+        index: test_index
+
+  - is_false: test_index.aliases.test_alias.is_write_index
+  - is_false: test_index.aliases.test_blias.is_write_index
+  - is_true: test_index.aliases.test_clias.is_write_index
 
 ---
 "Create index with invalid mappings":
@@ -105,7 +116,23 @@
         index: test_index
         body:
           mappings:
-            test_type:
+            properties:
+              "":
+                type:     keyword
+
+---
+"Create index with explicit _doc type":
+
+  - do:
+      catch: bad_request
+      indices.create:
+        index: test_index
+        body:
+          mappings:
+            _doc:
               properties:
-                "":
-                  type:     keyword
+                field:
+                  type: keyword
+
+  - match: { error.type: "illegal_argument_exception" }
+  - match: { error.reason: "The mapping definition cannot be nested under a type [_doc] unless include_type_name is set to true." }

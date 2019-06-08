@@ -8,13 +8,14 @@ package org.elasticsearch.xpack.watcher.actions;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.protocol.xpack.watcher.PutWatchResponse;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.search.sort.SortOrder;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.xpack.core.watcher.history.HistoryStoreField;
-import org.elasticsearch.xpack.core.watcher.support.xcontent.ObjectPath;
-import org.elasticsearch.xpack.core.watcher.transport.actions.put.PutWatchResponse;
+import org.elasticsearch.common.xcontent.ObjectPath;
+import org.elasticsearch.xpack.core.watcher.transport.actions.put.PutWatchRequestBuilder;
 import org.elasticsearch.xpack.watcher.test.AbstractWatcherIntegrationTestCase;
 
 import java.util.Map;
@@ -37,7 +38,7 @@ public class TimeThrottleIntegrationTests extends AbstractWatcherIntegrationTest
 
     public void testTimeThrottle(){
         String id = randomAlphaOfLength(20);
-        PutWatchResponse putWatchResponse = watcherClient().preparePutWatch()
+        PutWatchResponse putWatchResponse = new PutWatchRequestBuilder(client())
                 .setId(id)
                 .setSource(watchBuilder()
                         .trigger(schedule(interval("5s")))
@@ -63,12 +64,12 @@ public class TimeThrottleIntegrationTests extends AbstractWatcherIntegrationTest
 
     public void testTimeThrottleDefaults() {
         String id = randomAlphaOfLength(30);
-        PutWatchResponse putWatchResponse = watcherClient().preparePutWatch()
+        PutWatchResponse putWatchResponse = new PutWatchRequestBuilder(client())
                 .setId(id)
                 .setSource(watchBuilder()
                         .trigger(schedule(interval("1s")))
                         .input(simpleInput())
-                        .addAction("my-logging-action", indexAction("my_watcher_index", "action")))
+                        .addAction("my-logging-action", indexAction("my_watcher_index")))
                 .get();
         assertThat(putWatchResponse.isCreated(), is(true));
 

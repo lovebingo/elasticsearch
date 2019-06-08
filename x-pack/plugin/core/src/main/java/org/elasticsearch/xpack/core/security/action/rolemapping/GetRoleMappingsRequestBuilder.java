@@ -13,11 +13,10 @@ import org.elasticsearch.client.ElasticsearchClient;
  *
  * see org.elasticsearch.xpack.security.authc.support.mapper.NativeRoleMappingStore
  */
-public class GetRoleMappingsRequestBuilder extends ActionRequestBuilder<GetRoleMappingsRequest,
-        GetRoleMappingsResponse, GetRoleMappingsRequestBuilder> {
+public class GetRoleMappingsRequestBuilder extends ActionRequestBuilder<GetRoleMappingsRequest, GetRoleMappingsResponse> {
 
-    public GetRoleMappingsRequestBuilder(ElasticsearchClient client, GetRoleMappingsAction action) {
-        super(client, action, new GetRoleMappingsRequest());
+    public GetRoleMappingsRequestBuilder(ElasticsearchClient client) {
+        super(client, GetRoleMappingsAction.INSTANCE, new GetRoleMappingsRequest());
     }
 
     public GetRoleMappingsRequestBuilder names(String... names) {

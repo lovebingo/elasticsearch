@@ -21,10 +21,10 @@ package org.elasticsearch.search.internal;
 
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.AliasMetaData;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.CheckedFunction;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.index.Index;
@@ -49,8 +49,6 @@ public interface ShardSearchRequest {
 
     ShardId shardId();
 
-    String[] types();
-
     SearchSourceBuilder source();
 
     AliasFilter getAliasFilter();
@@ -69,7 +67,7 @@ public interface ShardSearchRequest {
 
     Boolean requestCache();
 
-    Boolean allowPartialSearchResults();
+    boolean allowPartialSearchResults();
 
     Scroll scroll();
 
@@ -82,17 +80,6 @@ public interface ShardSearchRequest {
      * Returns the preference of the original {@link SearchRequest#preference()}.
      */
     String preference();
-
-    /**
-     * Sets if this shard search needs to be profiled or not
-     * @param profile True if the shard should be profiled
-     */
-    void setProfile(boolean profile);
-
-    /**
-     * Returns true if this shard search is being profiled or not
-     */
-    boolean isProfile();
 
     /**
      * Returns the cache key for this shard search request, based on its content
@@ -152,9 +139,9 @@ public interface ShardSearchRequest {
     }
 
     /**
-     * Returns the cluster alias if this request is for a remote cluster or <code>null</code> if the request if targeted to the local
-     * cluster.
+     * Returns the cluster alias in case the request is part of a cross-cluster search request, <code>null</code> otherwise.
      */
+    @Nullable
     String getClusterAlias();
 
     Rewriteable<Rewriteable> getRewriteable();

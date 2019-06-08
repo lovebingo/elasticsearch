@@ -5,18 +5,17 @@
  */
 package org.elasticsearch.license;
 
+import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.common.io.Streams;
-import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.transport.Netty4Plugin;
 import org.elasticsearch.xpack.core.LocalStateCompositeXPackPlugin;
-import org.elasticsearch.xpack.core.XPackClientPlugin;
 
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -46,11 +45,6 @@ public class StartBasicLicenseTests extends AbstractLicensesIntegrationTestCase 
         return Arrays.asList(LocalStateCompositeXPackPlugin.class, Netty4Plugin.class);
     }
 
-    @Override
-    protected Collection<Class<? extends Plugin>> transportClientPlugins() {
-        return Arrays.asList(XPackClientPlugin.class, Netty4Plugin.class);
-    }
-
     public void testStartBasicLicense() throws Exception {
         LicensingClient licensingClient = new LicensingClient(client());
         License license = TestUtils.generateSignedLicense("trial",  License.VERSION_CURRENT, -1, TimeValue.timeValueHours(24));
@@ -68,12 +62,14 @@ public class StartBasicLicenseTests extends AbstractLicensesIntegrationTestCase 
         }
 
         RestClient restClient = getRestClient();
-        Response response = restClient.performRequest("GET", "/_xpack/license/basic_status");
+        Response response = restClient.performRequest(new Request("GET", "/_license/basic_status"));
         String body = Streams.copyToString(new InputStreamReader(response.getEntity().getContent(), StandardCharsets.UTF_8));
         assertEquals(200, response.getStatusLine().getStatusCode());
         assertEquals("{\"eligible_to_start_basic\":true}", body);
 
-        Response response2 = restClient.performRequest("POST", "/_xpack/license/start_basic?acknowledge=true");
+        Request ackRequest = new Request("POST", "/_license/start_basic");
+        ackRequest.addParameter("acknowledge", "true");
+        Response response2 = restClient.performRequest(ackRequest);
         String body2 = Streams.copyToString(new InputStreamReader(response2.getEntity().getContent(), StandardCharsets.UTF_8));
         assertEquals(200, response2.getStatusLine().getStatusCode());
         assertTrue(body2.contains("\"acknowledged\":true"));
@@ -87,20 +83,19 @@ public class StartBasicLicenseTests extends AbstractLicensesIntegrationTestCase 
         long expirationMillis = licensingClient.prepareGetLicense().get().license().expiryDate();
         assertEquals(LicenseService.BASIC_SELF_GENERATED_LICENSE_EXPIRATION_MILLIS, expirationMillis);
 
-        Response response3 = restClient.performRequest("GET", "/_xpack/license");
+        Response response3 = restClient.performRequest(new Request("GET", "/_license"));
         String body3 = Streams.copyToString(new InputStreamReader(response3.getEntity().getContent(), StandardCharsets.UTF_8));
         assertTrue(body3.contains("\"type\" : \"basic\""));
         assertFalse(body3.contains("expiry_date"));
         assertFalse(body3.contains("expiry_date_in_millis"));
 
-
-        Response response4 = restClient.performRequest("GET", "/_xpack/license/basic_status");
+        Response response4 = restClient.performRequest(new Request("GET", "/_license/basic_status"));
         String body4 = Streams.copyToString(new InputStreamReader(response4.getEntity().getContent(), StandardCharsets.UTF_8));
         assertEquals(200, response3.getStatusLine().getStatusCode());
         assertEquals("{\"eligible_to_start_basic\":false}", body4);
 
         ResponseException ex = expectThrows(ResponseException.class,
-                () -> restClient.performRequest("POST", "/_xpack/license/start_basic"));
+                () -> restClient.performRequest(new Request("POST", "/_license/start_basic")));
         Response response5 = ex.getResponse();
         String body5 = Streams.copyToString(new InputStreamReader(response5.getEntity().getContent(), StandardCharsets.UTF_8));
         assertEquals(403, response5.getStatusLine().getStatusCode());
@@ -119,7 +114,7 @@ public class StartBasicLicenseTests extends AbstractLicensesIntegrationTestCase 
             assertEquals("trial", getLicenseResponse.license().type());
         });
 
-        Response response2 = getRestClient().performRequest("POST", "/_xpack/license/start_basic");
+        Response response2 = getRestClient().performRequest(new Request("POST", "/_license/start_basic"));
         String body2 = Streams.copyToString(new InputStreamReader(response2.getEntity().getContent(), StandardCharsets.UTF_8));
         assertEquals(200, response2.getStatusLine().getStatusCode());
         assertTrue(body2.contains("\"acknowledged\":false"));

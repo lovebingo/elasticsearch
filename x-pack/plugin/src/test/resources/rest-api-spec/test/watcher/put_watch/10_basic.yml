@@ -5,7 +5,7 @@
           wait_for_status: yellow
 
   - do:
-      xpack.watcher.put_watch:
+      watcher.put_watch:
         id: "my_watch"
         body:  > 
           {
@@ -29,10 +29,22 @@
             "actions": {
               "test_index": {
                 "index": {
-                  "index": "test",
-                  "doc_type": "test2"
+                  "index": "test"
                 }
               }
             }
           }
   - match: { _id: "my_watch" }
+
+---
+"Test empty body is rejected by put watch":
+  - do:
+      cluster.health:
+          wait_for_status: yellow
+
+  - do:
+      catch: bad_request
+      watcher.put_watch:
+        id: "my_watch"
+  - match: { error.root_cause.0.type: "action_request_validation_exception" }
+  - match: { error.root_cause.0.reason: "Validation Failed: 1: request body is missing;" }

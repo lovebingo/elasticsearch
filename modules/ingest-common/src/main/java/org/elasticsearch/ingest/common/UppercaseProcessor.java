@@ -26,7 +26,7 @@ import java.util.Map;
  * Processor that converts the content of string fields to uppercase.
  * Throws exception is the field is not of type string.
  */
-public final class UppercaseProcessor extends AbstractStringProcessor {
+public final class UppercaseProcessor extends AbstractStringProcessor<String> {
 
     public static final String TYPE = "uppercase";
 
@@ -34,9 +34,13 @@ public final class UppercaseProcessor extends AbstractStringProcessor {
         super(processorTag, field, ignoreMissing, targetField);
     }
 
+    public static String apply(String value) {
+        return value.toUpperCase(Locale.ROOT);
+    }
+
     @Override
     protected String process(String value) {
-        return value.toUpperCase(Locale.ROOT);
+        return apply(value);
     }
 
     @Override

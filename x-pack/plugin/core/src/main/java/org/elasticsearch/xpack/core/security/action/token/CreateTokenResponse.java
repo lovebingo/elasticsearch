@@ -5,7 +5,6 @@
  */
 package org.elasticsearch.xpack.core.security.action.token;
 
-import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -59,9 +58,7 @@ public final class CreateTokenResponse extends ActionResponse implements ToXCont
         out.writeString(tokenString);
         out.writeTimeValue(expiresIn);
         out.writeOptionalString(scope);
-        if (out.getVersion().onOrAfter(Version.V_6_2_0)) {
-            out.writeString(refreshToken);
-        }
+        out.writeOptionalString(refreshToken);
     }
 
     @Override
@@ -70,9 +67,7 @@ public final class CreateTokenResponse extends ActionResponse implements ToXCont
         tokenString = in.readString();
         expiresIn = in.readTimeValue();
         scope = in.readOptionalString();
-        if (in.getVersion().onOrAfter(Version.V_6_2_0)) {
-            refreshToken = in.readString();
-        }
+        refreshToken = in.readOptionalString();
     }
 
     @Override
@@ -89,5 +84,21 @@ public final class CreateTokenResponse extends ActionResponse implements ToXCont
             builder.field("scope", scope);
         }
         return builder.endObject();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        CreateTokenResponse that = (CreateTokenResponse) o;
+        return Objects.equals(tokenString, that.tokenString) &&
+            Objects.equals(expiresIn, that.expiresIn) &&
+            Objects.equals(scope, that.scope) &&
+            Objects.equals(refreshToken, that.refreshToken);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(tokenString, expiresIn, scope, refreshToken);
     }
 }

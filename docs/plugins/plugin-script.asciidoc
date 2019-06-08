@@ -5,7 +5,8 @@ The `plugin` script is used to install, list, and remove plugins. It is
 located in the `$ES_HOME/bin` directory by default but it may be in a
 different location depending on which Elasticsearch package you installed:
 
-* {ref}/zip-targz.html#zip-targz-layout[Directory layout of `.zip` and `.tar.gz` archives]
+* {ref}/targz.html#targz-layout[Directory layout of `.tar.gz` archives]
+* {ref}/zip-windows.html#windows-layout[Directory layout of Windows `.zip` archives]
 * {ref}/deb.html#deb-layout[Directory layout of Debian package]
 * {ref}/rpm.html#rpm-layout[Directory layout of RPM]
 
@@ -88,7 +89,7 @@ must not be contained in the `plugins` directory for the node that you are
 installing the plugin to or installation will fail.
 
 HTTP::
-To install a plugin from a HTTP URL:
+To install a plugin from an HTTP URL:
 +
 [source,shell]
 -----------------------------------
@@ -224,7 +225,8 @@ bin\elasticsearch-plugin install analysis-icu
 
 The default location of the `plugins` directory depends on which package you install:
 
-* {ref}/zip-targz.html#zip-targz-layout[Directory layout of `.zip` and `.tar.gz` archives]
+* {ref}/targz.html#targz-layout[Directory layout of `.tar.gz` archives]
+* {ref}/zip-windows.html#windows-layout[Directory layout of Windows `.zip` archives]
 * {ref}/deb.html#deb-layout[Directory layout of Debian package]
 * {ref}/rpm.html#rpm-layout[Directory layout of RPM]
 

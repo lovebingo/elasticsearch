@@ -18,7 +18,6 @@
  */
 
 import org.apache.tools.ant.taskdefs.condition.Os
-import org.apache.tools.ant.filters.FixCrLfFilter
 import org.elasticsearch.gradle.BuildPlugin
 import org.elasticsearch.gradle.EmptyDirTask
 import org.elasticsearch.gradle.LoggedExec
@@ -46,25 +45,23 @@ task createPluginsDir(type: EmptyDirTask) {
   dirMode 0755
 }
 
-CopySpec archiveFiles(CopySpec modulesFiles, String distributionType, boolean oss) {
+CopySpec archiveFiles(CopySpec modulesFiles, String distributionType, String platform, boolean oss, boolean jdk) {
   return copySpec {
     into("elasticsearch-${version}") {
       into('lib') {
-        with libFiles
+        with libFiles(oss)
       }
       into('config') {
         dirMode 0750
         fileMode 0660
-        with configFiles(distributionType, oss)
+        with configFiles(distributionType, oss, jdk)
       }
       into('bin') {
-        with binFiles(distributionType, oss)
-        with copySpec {
-          from('../src/bin') {
-            include '*.bat'
-            filter(FixCrLfFilter, eol: FixCrLfFilter.CrLf.newInstance('crlf'))
-          }
-          MavenFilteringHack.filter(it, expansionsForDistribution(distributionType, oss))
+        with binFiles(distributionType, oss, jdk)
+      }
+      if (jdk) {
+        into('jdk') {
+          with jdkFiles(project, platform)
         }
       }
       into('') {
@@ -87,10 +84,7 @@ CopySpec archiveFiles(CopySpec modulesFiles, String distributionType, boolean os
         rename { 'LICENSE.txt' }
       }
 
-      with noticeFile
-      from('../src') {
-        include 'bin/*.exe'
-      }
+      with noticeFile(oss, jdk)
       into('modules') {
         with modulesFiles
       }
@@ -103,19 +97,41 @@ tasks.withType(AbstractArchiveTask) {
   dependsOn createLogsDir, createPluginsDir
   String subdir = it.name.substring('build'.size()).replaceAll(/[A-Z]/) { '-' + it.toLowerCase() }.substring(1)
   destinationDir = file("${subdir}/build/distributions")
-  baseName = "elasticsearch${ subdir.contains('oss') ? '-oss' : ''}"
+  baseName = "elasticsearch${subdir.contains('oss') ? '-oss' : ''}"
+}
+
+Closure commonZipConfig = {
+  dirMode 0755
+  fileMode 0644
 }
 
 task buildIntegTestZip(type: Zip) {
-  with archiveFiles(transportModulesFiles, 'zip', false)
+  configure(commonZipConfig)
+  with archiveFiles(transportModulesFiles, 'zip', null, true, false)
 }
 
-task buildZip(type: Zip) {
-  with archiveFiles(modulesFiles(false), 'zip', false)
+task buildWindowsZip(type: Zip) {
+  configure(commonZipConfig)
+  archiveClassifier = 'windows-x86_64'
+  with archiveFiles(modulesFiles(false, 'windows'), 'zip', 'windows', false, true)
 }
 
-task buildOssZip(type: Zip) {
-  with archiveFiles(modulesFiles(true), 'zip', true)
+task buildOssWindowsZip(type: Zip) {
+  configure(commonZipConfig)
+  archiveClassifier = 'windows-x86_64'
+  with archiveFiles(modulesFiles(true, 'windows'), 'zip', 'windows', true, true)
+}
+
+task buildNoJdkWindowsZip(type: Zip) {
+  configure(commonZipConfig)
+  archiveClassifier = 'no-jdk-windows-x86_64'
+  with archiveFiles(modulesFiles(false, 'windows'), 'zip', 'windows', false, false)
+}
+
+task buildOssNoJdkWindowsZip(type: Zip) {
+  configure(commonZipConfig)
+  archiveClassifier = 'no-jdk-windows-x86_64'
+  with archiveFiles(modulesFiles(true, 'windows'), 'zip', 'windows', true, false)
 }
 
 Closure commonTarConfig = {
@@ -125,14 +141,52 @@ Closure commonTarConfig = {
   fileMode 0644
 }
 
-task buildTar(type: Tar) {
+task buildDarwinTar(type: Tar) {
   configure(commonTarConfig)
-  with archiveFiles(modulesFiles(false), 'tar', false)
+  archiveClassifier = 'darwin-x86_64'
+  with archiveFiles(modulesFiles(false, 'darwin'), 'tar', 'darwin', false, true)
 }
 
-task buildOssTar(type: Tar) {
+task buildOssDarwinTar(type: Tar) {
   configure(commonTarConfig)
-  with archiveFiles(modulesFiles(true), 'tar', true)
+  archiveClassifier = 'darwin-x86_64'
+  with archiveFiles(modulesFiles(true, 'darwin'), 'tar', 'darwin', true, true)
+}
+
+task buildNoJdkDarwinTar(type: Tar) {
+  configure(commonTarConfig)
+  archiveClassifier = 'no-jdk-darwin-x86_64'
+  with archiveFiles(modulesFiles(false, 'darwin'), 'tar', 'darwin', false, false)
+}
+
+task buildOssNoJdkDarwinTar(type: Tar) {
+  configure(commonTarConfig)
+  archiveClassifier = 'no-jdk-darwin-x86_64'
+  with archiveFiles(modulesFiles(true, 'darwin'), 'tar', 'darwin', true, false)
+}
+
+task buildLinuxTar(type: Tar) {
+  configure(commonTarConfig)
+  archiveClassifier = 'linux-x86_64'
+  with archiveFiles(modulesFiles(false, 'linux'), 'tar', 'linux', false, true)
+}
+
+task buildOssLinuxTar(type: Tar) {
+  configure(commonTarConfig)
+  archiveClassifier = 'linux-x86_64'
+  with archiveFiles(modulesFiles(true, 'linux'), 'tar', 'linux', true, true)
+}
+
+task buildNoJdkLinuxTar(type: Tar) {
+  configure(commonTarConfig)
+  archiveClassifier = 'no-jdk-linux-x86_64'
+  with archiveFiles(modulesFiles(false, 'linux'), 'tar', 'linux', false, false)
+}
+
+task buildOssNoJdkLinuxTar(type: Tar) {
+  configure(commonTarConfig)
+  archiveClassifier = 'no-jdk-linux-x86_64'
+  with archiveFiles(modulesFiles(true, 'linux'), 'tar', 'linux', true, false)
 }
 
 Closure tarExists = { it -> new File('/bin/tar').exists() || new File('/usr/bin/tar').exists() || new File('/usr/local/bin/tar').exists() }
@@ -154,7 +208,7 @@ subprojects {
   }
 
   // sanity checks if archives can be extracted
-  final File archiveExtractionDir
+  File archiveExtractionDir
   if (project.name.contains('tar')) {
     archiveExtractionDir = new File(buildDir, 'tar-extracted')
   } else {
@@ -182,7 +236,7 @@ subprojects {
     }
   }
 
-  final Closure toolExists
+  Closure toolExists
   if (project.name.contains('tar')) {
     toolExists = tarExists
   } else {
@@ -195,8 +249,8 @@ subprojects {
     dependsOn buildDist, checkExtraction
     onlyIf toolExists
     doLast {
-      final String licenseFilename
-      if (project.name.contains('oss-')) {
+      String licenseFilename = null
+      if (project.name.contains('oss-') || project.name == 'integ-test-zip') {
         licenseFilename = "APACHE-LICENSE-2.0.txt"
       } else {
         licenseFilename = "ELASTIC-LICENSE.txt"
@@ -220,6 +274,8 @@ subprojects {
   check.dependsOn checkNotice
 
   if (project.name == 'zip' || project.name == 'tar') {
+    project.ext.licenseName = 'Elastic License'
+    project.ext.licenseUrl = ext.elasticLicenseUrl
     task checkMlCppNotice {
       dependsOn buildDist, checkExtraction
       onlyIf toolExists
@@ -239,12 +295,18 @@ subprojects {
   }
 }
 
+subprojects {
+  group = "org.elasticsearch.distribution.${name.startsWith("oss-") ? "oss" : "default"}"
+}
+
 /*****************************************************************************
  *                            Rest test config                               *
  *****************************************************************************/
 configure(subprojects.findAll { it.name == 'integ-test-zip' }) {
   apply plugin: 'elasticsearch.standalone-rest-test'
   apply plugin: 'elasticsearch.rest-test'
+
+  group = "org.elasticsearch.distribution.integ-test-zip"
 
   integTest {
     includePackaged = true
@@ -265,22 +327,13 @@ configure(subprojects.findAll { it.name == 'integ-test-zip' }) {
     inputs.properties(project(':distribution').restTestExpansions)
     MavenFilteringHack.filter(it, project(':distribution').restTestExpansions)
   }
-}
 
-/*****************************************************************************
- *                              Maven config                                 *
- *****************************************************************************/
-configure(subprojects.findAll { it.name.contains('zip') }) {
-  // only zip distributions go to maven
+
+  // The integ-test-distribution is published to maven
   BuildPlugin.configurePomGeneration(project)
   apply plugin: 'nebula.info-scm'
   apply plugin: 'nebula.maven-base-publish'
   apply plugin: 'nebula.maven-scm'
-
-  // note: the group must be correct before applying the nexus plugin, or
-  // it will capture the wrong value...
-  String subgroup = project.name == 'integ-test-zip' ? 'integ-test-zip' : 'zip'
-  project.group = "org.elasticsearch.distribution.${subgroup}"
 
   // make the pom file name use elasticsearch instead of the project name
   archivesBaseName = "elasticsearch${it.name.contains('oss') ? '-oss' : ''}"
@@ -322,3 +375,4 @@ configure(subprojects.findAll { it.name.contains('zip') }) {
     }
   }
 }
+

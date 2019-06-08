@@ -14,7 +14,7 @@ The javadoc for the low level REST client can be found at {rest-client-javadoc}/
 
 The low-level Java REST client is hosted on
 http://search.maven.org/#search%7Cga%7C1%7Cg%3A%22org.elasticsearch.client%22[Maven
-Central]. The minimum Java version required is `1.7`.
+Central]. The minimum Java version required is `1.8`.
 
 The low-level REST client is subject to the same release cycle as
 Elasticsearch. Replace the version with the desired client version, first
@@ -182,19 +182,20 @@ prevent having to specify them with each single request
 
 ["source","java",subs="attributes,callouts,macros"]
 --------------------------------------------------
-include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-init-max-retry-timeout]
---------------------------------------------------
-<1> Set the timeout that should be honoured in case multiple attempts are made
-for the same request. The default value is 30 seconds, same as the default
-socket timeout. In case the socket timeout is customized, the maximum retry
-timeout should be adjusted accordingly
-
-["source","java",subs="attributes,callouts,macros"]
---------------------------------------------------
 include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-init-failure-listener]
 --------------------------------------------------
 <1> Set a listener that gets notified every time a node fails,  in case actions
 need to be taken. Used internally when sniffing on failure is enabled.
+
+["source","java",subs="attributes,callouts,macros"]
+--------------------------------------------------
+include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-init-node-selector]
+--------------------------------------------------
+<1> Set the node selector to be used to filter the nodes the client will send
+requests to among the ones that are set to the client itself. This is useful
+for instance to prevent sending requests to dedicated master nodes when
+sniffing is enabled. By default the client sends requests to every configured
+node.
 
 ["source","java",subs="attributes,callouts,macros"]
 --------------------------------------------------
@@ -271,29 +272,54 @@ a `ContentType` of `application/json`.
 include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-body-shorter]
 --------------------------------------------------
 
-And you can add one or more headers to send with the request:
+[[java-rest-low-usage-request-options]]
+==== RequestOptions
+
+The `RequestOptions` class holds parts of the request that should be shared
+between many requests in the same application. You can make a singleton
+instance and share it between all requests:
 
 ["source","java",subs="attributes,callouts,macros"]
 --------------------------------------------------
-include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-headers]
+include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-options-singleton]
 --------------------------------------------------
+<1> Add any headers needed by all requests.
+<2> Customize the response consumer.
+
+`addHeader` is for headers that are required for authorization or to work with
+a proxy in front of Elasticsearch. There is no need to set the `Content-Type`
+header because the client will automatically set that from the `HttpEntity`
+attached to the request.
+
+You can set the `NodeSelector` which controls which nodes will receive
+requests. `NodeSelector.NOT_MASTER_ONLY` is a good choice.
 
 You can also customize the response consumer used to buffer the asynchronous
 responses. The default consumer will buffer up to 100MB of response on the
 JVM heap. If the response is larger then the request will fail. You could,
 for example, lower the maximum size which might be useful if you are running
-in a heap constrained environment:
+in a heap constrained environment like the example above.
+
+Once you've created the singleton you can use it when making requests:
 
 ["source","java",subs="attributes,callouts,macros"]
 --------------------------------------------------
-include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-response-consumer]
+include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-options-set-singleton]
+--------------------------------------------------
+
+You can also customize these options on a per request basis. For example, this
+adds an extra header:
+
+["source","java",subs="attributes,callouts,macros"]
+--------------------------------------------------
+include-tagged::{doc-tests}/RestClientDocumentation.java[rest-client-options-customize-header]
 --------------------------------------------------
 
 ==== Multiple parallel asynchronous actions
 
 The client is quite happy to execute many actions in parallel. The following
 example indexes many documents in parallel. In a real world scenario you'd
-probably want to use the `_bulk` API instead, but the example is illustative.
+probably want to use the `_bulk` API instead, but the example is illustrative.
 
 ["source","java",subs="attributes,callouts,macros"]
 --------------------------------------------------

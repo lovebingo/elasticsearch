@@ -28,19 +28,21 @@ import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermStates;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.DisjunctionMaxQuery;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.search.QueryUtils;
 import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.similarities.BM25Similarity;
 import org.apache.lucene.search.similarities.ClassicSimilarity;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.util.TestUtil;
 import org.elasticsearch.test.ESTestCase;
 
 import java.io.IOException;
@@ -52,6 +54,8 @@ import java.util.Set;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.instanceOf;
 
 public class BlendedTermQueryTests extends ESTestCase {
     public void testDismaxQuery() throws IOException {
@@ -63,15 +67,12 @@ public class BlendedTermQueryTests extends ESTestCase {
                 "generator", "foo fighers - generator", "foo fighters generator"
         };
         final boolean omitNorms = random().nextBoolean();
+        final boolean omitFreqs = random().nextBoolean();
         FieldType ft = new FieldType(TextField.TYPE_NOT_STORED);
-        ft.setIndexOptions(random().nextBoolean() ? IndexOptions.DOCS : IndexOptions.DOCS_AND_FREQS);
+        ft.setIndexOptions(omitFreqs ? IndexOptions.DOCS : IndexOptions.DOCS_AND_FREQS);
         ft.setOmitNorms(omitNorms);
         ft.freeze();
 
-        FieldType ft1 = new FieldType(TextField.TYPE_NOT_STORED);
-        ft1.setIndexOptions(random().nextBoolean() ? IndexOptions.DOCS : IndexOptions.DOCS_AND_FREQS);
-        ft1.setOmitNorms(omitNorms);
-        ft1.freeze();
         for (int i = 0; i < username.length; i++) {
             Document d = new Document();
             d.add(new TextField("id", Integer.toString(i), Field.Store.YES));
@@ -83,8 +84,8 @@ public class BlendedTermQueryTests extends ESTestCase {
         for (int j = 0; j < iters; j++) {
             Document d = new Document();
             d.add(new TextField("id", Integer.toString(username.length + j), Field.Store.YES));
-            d.add(new Field("username", "foo fighters", ft1));
-            d.add(new Field("song", "some bogus text to bump up IDF", ft1));
+            d.add(new Field("username", "foo fighters", ft));
+            d.add(new Field("song", "some bogus text to bump up IDF", ft));
             w.addDocument(d);
         }
         w.commit();
@@ -117,6 +118,61 @@ public class BlendedTermQueryTests extends ESTestCase {
             assertEquals(Integer.toString(1), reader.document(scoreDocs[0].doc).getField("id").stringValue());
 
         }
+        {
+            // test with an unknown field
+            String[] fields = new String[] {"username", "song", "unknown_field"};
+            Query query = BlendedTermQuery.dismaxBlendedQuery(toTerms(fields, "foo"), 1.0f);
+            Query rewrite = searcher.rewrite(query);
+            assertThat(rewrite, instanceOf(BooleanQuery.class));
+            for (BooleanClause clause : (BooleanQuery) rewrite) {
+                assertThat(clause.getQuery(), instanceOf(TermQuery.class));
+                TermQuery termQuery = (TermQuery) clause.getQuery();
+                TermStates termStates = termQuery.getTermStates();
+                if (termQuery.getTerm().field().equals("unknown_field")) {
+                    assertThat(termStates.docFreq(), equalTo(0));
+                    assertThat(termStates.totalTermFreq(), equalTo(0L));
+                } else {
+                    assertThat(termStates.docFreq(), greaterThan(0));
+                    assertThat(termStates.totalTermFreq(), greaterThan(0L));
+                }
+            }
+            assertThat(searcher.search(query, 10).totalHits.value, equalTo((long) iters + username.length));
+        }
+        {
+            // test with an unknown field and an unknown term
+            String[] fields = new String[] {"username", "song", "unknown_field"};
+            Query query = BlendedTermQuery.dismaxBlendedQuery(toTerms(fields, "unknown_term"), 1.0f);
+            Query rewrite = searcher.rewrite(query);
+            assertThat(rewrite, instanceOf(BooleanQuery.class));
+            for (BooleanClause clause : (BooleanQuery) rewrite) {
+                assertThat(clause.getQuery(), instanceOf(TermQuery.class));
+                TermQuery termQuery = (TermQuery) clause.getQuery();
+                TermStates termStates = termQuery.getTermStates();
+                assertThat(termStates.docFreq(), equalTo(0));
+                assertThat(termStates.totalTermFreq(), equalTo(0L));
+            }
+            assertThat(searcher.search(query, 10).totalHits.value, equalTo(0L));
+        }
+        {
+            // test with an unknown field and a term that is present in only one field
+            String[] fields = new String[] {"username", "song", "id", "unknown_field"};
+            Query query = BlendedTermQuery.dismaxBlendedQuery(toTerms(fields, "fan"), 1.0f);
+            Query rewrite = searcher.rewrite(query);
+            assertThat(rewrite, instanceOf(BooleanQuery.class));
+            for (BooleanClause clause : (BooleanQuery) rewrite) {
+                assertThat(clause.getQuery(), instanceOf(TermQuery.class));
+                TermQuery termQuery = (TermQuery) clause.getQuery();
+                TermStates termStates = termQuery.getTermStates();
+                if (termQuery.getTerm().field().equals("username")) {
+                    assertThat(termStates.docFreq(), equalTo(1));
+                    assertThat(termStates.totalTermFreq(), equalTo(1L));
+                } else {
+                    assertThat(termStates.docFreq(), equalTo(0));
+                    assertThat(termStates.totalTermFreq(), equalTo(0L));
+                }
+            }
+            assertThat(searcher.search(query, 10).totalHits.value, equalTo(1L));
+        }
         reader.close();
         w.close();
         dir.close();
@@ -127,9 +183,9 @@ public class BlendedTermQueryTests extends ESTestCase {
         for (int j = 0; j < iters; j++) {
             String[] fields = new String[1 + random().nextInt(10)];
             for (int i = 0; i < fields.length; i++) {
-                fields[i] = TestUtil.randomRealisticUnicodeString(random(), 1, 10);
+                fields[i] = randomRealisticUnicodeOfLengthBetween(1, 10);
             }
-            String term = TestUtil.randomRealisticUnicodeString(random(), 1, 10);
+            String term = randomRealisticUnicodeOfLengthBetween(1, 10);
             Term[] terms = toTerms(fields, term);
             float tieBreaker = random().nextFloat();
             BlendedTermQuery query = BlendedTermQuery.dismaxBlendedQuery(terms, tieBreaker);
@@ -161,14 +217,44 @@ public class BlendedTermQueryTests extends ESTestCase {
         Set<Term> terms = new HashSet<>();
         int num = scaledRandomIntBetween(1, 10);
         for (int i = 0; i < num; i++) {
-            terms.add(new Term(TestUtil.randomRealisticUnicodeString(random(), 1, 10), TestUtil.randomRealisticUnicodeString(random(), 1, 10)));
+            terms.add(new Term(randomRealisticUnicodeOfLengthBetween(1, 10), randomRealisticUnicodeOfLengthBetween(1, 10)));
         }
 
         BlendedTermQuery blendedTermQuery = BlendedTermQuery.dismaxBlendedQuery(terms.toArray(new Term[0]), random().nextFloat());
         Set<Term> extracted = new HashSet<>();
         IndexSearcher searcher = new IndexSearcher(new MultiReader());
-        searcher.createNormalizedWeight(blendedTermQuery, false).extractTerms(extracted);
+        searcher.createWeight(searcher.rewrite(blendedTermQuery), ScoreMode.COMPLETE_NO_SCORES, 1f).extractTerms(extracted);
         assertThat(extracted.size(), equalTo(terms.size()));
         assertThat(extracted, containsInAnyOrder(terms.toArray(new Term[0])));
+    }
+
+    public void testMinTTF() throws IOException {
+        Directory dir = newDirectory();
+        IndexWriter w = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random())));
+        FieldType ft = new FieldType(TextField.TYPE_NOT_STORED);
+        ft.freeze();
+
+        for (int i = 0; i < 10; i++) {
+            Document d = new Document();
+            d.add(new TextField("id", Integer.toString(i), Field.Store.YES));
+            d.add(new Field("dense", "foo foo foo", ft));
+            if (i % 10 == 0) {
+                d.add(new Field("sparse", "foo", ft));
+            }
+            w.addDocument(d);
+        }
+        w.commit();
+        DirectoryReader reader = DirectoryReader.open(w);
+        IndexSearcher searcher = setSimilarity(newSearcher(reader));
+        {
+            String[] fields = new String[]{"dense", "sparse"};
+            Query query = BlendedTermQuery.dismaxBlendedQuery(toTerms(fields, "foo"), 0.1f);
+            TopDocs search = searcher.search(query, 10);
+            ScoreDoc[] scoreDocs = search.scoreDocs;
+            assertEquals(Integer.toString(0), reader.document(scoreDocs[0].doc).getField("id").stringValue());
+        }
+        reader.close();
+        w.close();
+        dir.close();
     }
 }

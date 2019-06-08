@@ -59,6 +59,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.EnumSet;
@@ -201,6 +202,16 @@ public abstract class StreamInput extends InputStream {
     public int readInt() throws IOException {
         return ((readByte() & 0xFF) << 24) | ((readByte() & 0xFF) << 16)
                 | ((readByte() & 0xFF) << 8) | (readByte() & 0xFF);
+    }
+
+    /**
+     * Reads an optional {@link Integer}.
+     */
+    public Integer readOptionalInt() throws IOException {
+        if (readBoolean()) {
+            return readInt();
+        }
+        return null;
     }
 
     /**
@@ -404,7 +415,6 @@ public abstract class StreamInput extends InputStream {
         return spare.toString();
     }
 
-
     public final float readFloat() throws IOException {
         return Float.intBitsToFloat(readInt());
     }
@@ -518,7 +528,6 @@ public abstract class StreamInput extends InputStream {
         return (Map<String, Object>) readGenericValue();
     }
 
-    @SuppressWarnings({"unchecked"})
     @Nullable
     public Object readGenericValue() throws IOException {
         byte type = readByte();
@@ -576,6 +585,23 @@ public abstract class StreamInput extends InputStream {
             default:
                 throw new IOException("Can't read unknown type [" + type + "]");
         }
+    }
+
+    /**
+     * Read an {@link Instant} from the stream with nanosecond resolution
+     */
+    public final Instant readInstant() throws IOException {
+        return Instant.ofEpochSecond(readLong(), readInt());
+    }
+
+    /**
+     * Read an optional {@link Instant} from the stream. Returns <code>null</code> when
+     * no instant is present.
+     */
+    @Nullable
+    public final Instant readOptionalInstant() throws IOException {
+        final boolean present = readBoolean();
+        return present ? readInstant() : null;
     }
 
     @SuppressWarnings("unchecked")
@@ -649,6 +675,23 @@ public abstract class StreamInput extends InputStream {
     public DateTimeZone readOptionalTimeZone() throws IOException {
         if (readBoolean()) {
             return DateTimeZone.forID(readString());
+        }
+        return null;
+    }
+
+    /**
+     * Read a {@linkplain DateTimeZone}.
+     */
+    public ZoneId readZoneId() throws IOException {
+        return ZoneId.of(readString());
+    }
+
+    /**
+     * Read an optional {@linkplain ZoneId}.
+     */
+    public ZoneId readOptionalZoneId() throws IOException {
+        if (readBoolean()) {
+            return ZoneId.of(readString());
         }
         return null;
     }
@@ -929,11 +972,40 @@ public abstract class StreamInput extends InputStream {
     }
 
     /**
-     * Reads a list of objects
+     * Reads a list of objects. The list is expected to have been written using {@link StreamOutput#writeList(List)} or
+     * {@link StreamOutput#writeStreamableList(List)}.
+     *
+     * @return the list of objects
+     * @throws IOException if an I/O exception occurs reading the list
      */
-    public <T> List<T> readList(Writeable.Reader<T> reader) throws IOException {
+    public <T> List<T> readList(final Writeable.Reader<T> reader) throws IOException {
+        return readCollection(reader, ArrayList::new);
+    }
+
+    /**
+     * Reads a list of strings. The list is expected to have been written using {@link StreamOutput#writeStringCollection(Collection)}.
+     *
+     * @return the list of strings
+     * @throws IOException if an I/O exception occurs reading the list
+     */
+    public List<String> readStringList() throws IOException {
+        return readList(StreamInput::readString);
+    }
+
+    /**
+     * Reads a set of objects
+     */
+    public <T> Set<T> readSet(Writeable.Reader<T> reader) throws IOException {
+        return readCollection(reader, HashSet::new);
+    }
+
+    /**
+     * Reads a collection of objects
+     */
+    private <T, C extends Collection<? super T>> C readCollection(Writeable.Reader<T> reader,
+                                                                  IntFunction<C> constructor) throws IOException {
         int count = readArraySize();
-        List<T> builder = new ArrayList<>(count);
+        C builder = constructor.apply(count);
         for (int i=0; i<count; i++) {
             builder.add(reader.read(this));
         }
@@ -953,7 +1025,7 @@ public abstract class StreamInput extends InputStream {
     }
 
     /**
-     * Reads an enum with type E that was serialized based on the value of it's ordinal
+     * Reads an enum with type E that was serialized based on the value of its ordinal
      */
     public <E extends Enum<E>> E readEnum(Class<E> enumClass) throws IOException {
         int ordinal = readVInt();

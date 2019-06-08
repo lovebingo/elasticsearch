@@ -20,12 +20,10 @@
 package org.elasticsearch.action.admin.indices.shrink;
 
 import org.apache.lucene.index.IndexWriter;
-import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.indices.create.CreateIndexClusterStateUpdateRequest;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
 import org.elasticsearch.action.admin.indices.stats.IndexShardStats;
-import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.master.TransportMasterNodeAction;
 import org.elasticsearch.client.Client;
@@ -35,11 +33,11 @@ import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.MetaDataCreateIndexService;
-import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.IndexNotFoundException;
+import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.shard.DocsStats;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -58,17 +56,17 @@ public class TransportResizeAction extends TransportMasterNodeAction<ResizeReque
     private final Client client;
 
     @Inject
-    public TransportResizeAction(Settings settings, TransportService transportService, ClusterService clusterService,
+    public TransportResizeAction(TransportService transportService, ClusterService clusterService,
                                  ThreadPool threadPool, MetaDataCreateIndexService createIndexService,
                                  ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver, Client client) {
-        this(settings, ResizeAction.NAME, transportService, clusterService, threadPool, createIndexService, actionFilters,
+        this(ResizeAction.NAME, transportService, clusterService, threadPool, createIndexService, actionFilters,
             indexNameExpressionResolver, client);
     }
 
-    protected TransportResizeAction(Settings settings, String actionName, TransportService transportService, ClusterService clusterService,
+    protected TransportResizeAction(String actionName, TransportService transportService, ClusterService clusterService,
                                  ThreadPool threadPool, MetaDataCreateIndexService createIndexService,
                                  ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver, Client client) {
-        super(settings, actionName, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver,
+        super(actionName, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver,
             ResizeRequest::new);
         this.createIndexService = createIndexService;
         this.client = client;
@@ -98,28 +96,18 @@ public class TransportResizeAction extends TransportMasterNodeAction<ResizeReque
         // there is no need to fetch docs stats for split but we keep it simple and do it anyway for simplicity of the code
         final String sourceIndex = indexNameExpressionResolver.resolveDateMathExpression(resizeRequest.getSourceIndex());
         final String targetIndex = indexNameExpressionResolver.resolveDateMathExpression(resizeRequest.getTargetIndexRequest().index());
-        client.admin().indices().prepareStats(sourceIndex).clear().setDocs(true).execute(new ActionListener<IndicesStatsResponse>() {
-            @Override
-            public void onResponse(IndicesStatsResponse indicesStatsResponse) {
+        client.admin().indices().prepareStats(sourceIndex).clear().setDocs(true).execute(
+            ActionListener.delegateFailure(listener, (delegatedListener, indicesStatsResponse) -> {
                 CreateIndexClusterStateUpdateRequest updateRequest = prepareCreateIndexRequest(resizeRequest, state,
-                    (i) -> {
+                    i -> {
                         IndexShardStats shard = indicesStatsResponse.getIndex(sourceIndex).getIndexShards().get(i);
                         return shard == null ? null : shard.getPrimary().getDocs();
                     }, sourceIndex, targetIndex);
                 createIndexService.createIndex(
-                    updateRequest,
-                    ActionListener.wrap(response ->
-                            listener.onResponse(new ResizeResponse(response.isAcknowledged(), response.isShardsAcknowledged(),
-                                    updateRequest.index())), listener::onFailure
-                    )
+                    updateRequest, ActionListener.map(delegatedListener,
+                        response -> new ResizeResponse(response.isAcknowledged(), response.isShardsAcknowledged(), updateRequest.index()))
                 );
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                listener.onFailure(e);
-            }
-        });
+            }));
 
     }
 
@@ -172,6 +160,11 @@ public class TransportResizeAction extends TransportMasterNodeAction<ResizeReque
                 throw new IllegalArgumentException("cannot provide index.number_of_routing_shards on resize");
             }
         }
+        if (IndexSettings.INDEX_SOFT_DELETES_SETTING.get(metaData.getSettings()) &&
+            IndexSettings.INDEX_SOFT_DELETES_SETTING.exists(targetIndexSettings) &&
+            IndexSettings.INDEX_SOFT_DELETES_SETTING.get(targetIndexSettings) == false) {
+            throw new IllegalArgumentException("Can't disable [index.soft_deletes.enabled] setting on resize");
+        }
         String cause = resizeRequest.getResizeType().name().toLowerCase(Locale.ROOT) + "_index";
         targetIndex.cause(cause);
         Settings.Builder settingsBuilder = Settings.builder().put(targetIndexSettings);
@@ -186,21 +179,9 @@ public class TransportResizeAction extends TransportMasterNodeAction<ResizeReque
                 .masterNodeTimeout(targetIndex.masterNodeTimeout())
                 .settings(targetIndex.settings())
                 .aliases(targetIndex.aliases())
-                .customs(targetIndex.customs())
                 .waitForActiveShards(targetIndex.waitForActiveShards())
                 .recoverFrom(metaData.getIndex())
                 .resizeType(resizeRequest.getResizeType())
                 .copySettings(resizeRequest.getCopySettings() == null ? false : resizeRequest.getCopySettings());
-    }
-
-    @Override
-    protected String getMasterActionName(DiscoveryNode node) {
-        if (node.getVersion().onOrAfter(ResizeAction.COMPATIBILITY_VERSION)){
-            return super.getMasterActionName(node);
-        } else {
-            // this is for BWC - when we send this to version that doesn't have ResizeAction.NAME registered
-            // we have to send to shrink instead.
-            return ShrinkAction.NAME;
-        }
     }
 }

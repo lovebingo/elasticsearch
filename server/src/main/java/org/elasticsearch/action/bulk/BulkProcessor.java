@@ -26,6 +26,7 @@ import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
@@ -39,7 +40,9 @@ import java.util.Objects;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 /**
  * A bulk processor is a thread safe bulk processing class, allowing to easily set when to "flush" a new bulk request
@@ -88,6 +91,10 @@ public class BulkProcessor implements Closeable {
         private ByteSizeValue bulkSize = new ByteSizeValue(5, ByteSizeUnit.MB);
         private TimeValue flushInterval = null;
         private BackoffPolicy backoffPolicy = BackoffPolicy.exponentialBackoff();
+        private String globalIndex;
+        private String globalType;
+        private String globalRouting;
+        private String globalPipeline;
 
         private Builder(BiConsumer<BulkRequest, ActionListener<BulkResponse>> consumer, Listener listener,
                         Scheduler scheduler, Runnable onClose) {
@@ -136,6 +143,26 @@ public class BulkProcessor implements Closeable {
             return this;
         }
 
+        public Builder setGlobalIndex(String globalIndex) {
+            this.globalIndex = globalIndex;
+            return this;
+        }
+
+        public Builder setGlobalType(String globalType) {
+            this.globalType = globalType;
+            return this;
+        }
+
+        public Builder setGlobalRouting(String globalRouting) {
+            this.globalRouting = globalRouting;
+            return this;
+        }
+
+        public Builder setGlobalPipeline(String globalPipeline) {
+            this.globalPipeline = globalPipeline;
+            return this;
+        }
+
         /**
          * Sets a custom backoff policy. The backoff policy defines how the bulk processor should handle retries of bulk requests internally
          * in case they have failed due to resource constraints (i.e. a thread pool was full).
@@ -156,8 +183,14 @@ public class BulkProcessor implements Closeable {
          * Builds a new bulk processor.
          */
         public BulkProcessor build() {
-            return new BulkProcessor(consumer, backoffPolicy, listener, concurrentRequests, bulkActions, bulkSize, flushInterval,
-                    scheduler, onClose);
+            return new BulkProcessor(consumer, backoffPolicy, listener, concurrentRequests, bulkActions,
+                bulkSize, flushInterval, scheduler, onClose, createBulkRequestWithGlobalDefaults());
+        }
+
+        private Supplier<BulkRequest> createBulkRequestWithGlobalDefaults() {
+            return () -> new BulkRequest(globalIndex, globalType)
+                .pipeline(globalPipeline)
+                .routing(globalRouting);
         }
     }
 
@@ -172,8 +205,13 @@ public class BulkProcessor implements Closeable {
         Objects.requireNonNull(listener, "listener");
         final ScheduledThreadPoolExecutor scheduledThreadPoolExecutor = Scheduler.initScheduler(Settings.EMPTY);
         return new Builder(consumer, listener,
-                (delay, executor, command) -> scheduledThreadPoolExecutor.schedule(command, delay.millis(), TimeUnit.MILLISECONDS),
+            buildScheduler(scheduledThreadPoolExecutor),
                 () -> Scheduler.terminate(scheduledThreadPoolExecutor, 10, TimeUnit.SECONDS));
+    }
+
+    private static Scheduler buildScheduler(ScheduledThreadPoolExecutor scheduledThreadPoolExecutor) {
+        return (command, delay, executor) ->
+            Scheduler.wrapAsScheduledCancellable(scheduledThreadPoolExecutor.schedule(command, delay.millis(), TimeUnit.MILLISECONDS));
     }
 
     private final int bulkActions;
@@ -184,17 +222,20 @@ public class BulkProcessor implements Closeable {
     private final AtomicLong executionIdGen = new AtomicLong();
 
     private BulkRequest bulkRequest;
+    private final Supplier<BulkRequest> bulkRequestSupplier;
     private final BulkRequestHandler bulkRequestHandler;
     private final Runnable onClose;
 
     private volatile boolean closed = false;
+    private final ReentrantLock lock = new ReentrantLock();
 
     BulkProcessor(BiConsumer<BulkRequest, ActionListener<BulkResponse>> consumer, BackoffPolicy backoffPolicy, Listener listener,
                   int concurrentRequests, int bulkActions, ByteSizeValue bulkSize, @Nullable TimeValue flushInterval,
-                  Scheduler scheduler, Runnable onClose) {
+                  Scheduler scheduler, Runnable onClose, Supplier<BulkRequest> bulkRequestSupplier) {
         this.bulkActions = bulkActions;
         this.bulkSize = bulkSize.getBytes();
-        this.bulkRequest = new BulkRequest();
+        this.bulkRequest = bulkRequestSupplier.get();
+        this.bulkRequestSupplier = bulkRequestSupplier;
         this.bulkRequestHandler = new BulkRequestHandler(consumer, backoffPolicy, listener, scheduler, concurrentRequests);
         // Start period flushing task after everything is setup
         this.cancellableFlushTask = startFlushTask(flushInterval, scheduler);
@@ -217,29 +258,35 @@ public class BulkProcessor implements Closeable {
      * Closes the processor. If flushing by time is enabled, then it's shutdown. Any remaining bulk actions are flushed.
      * <p>
      * If concurrent requests are not enabled, returns {@code true} immediately.
-     * If concurrent requests are enabled, waits for up to the specified timeout for all bulk requests to complete then returns {@code true},
+     * If concurrent requests are enabled, waits for up to the specified timeout for all bulk requests to complete then returns {@code true}
      * If the specified waiting time elapses before all bulk requests complete, {@code false} is returned.
      *
      * @param timeout The maximum time to wait for the bulk requests to complete
      * @param unit    The time unit of the {@code timeout} argument
-     * @return {@code true} if all bulk requests completed and {@code false} if the waiting time elapsed before all the bulk requests completed
+     * @return {@code true} if all bulk requests completed and {@code false} if the waiting time elapsed before all the bulk requests
+     * completed
      * @throws InterruptedException If the current thread is interrupted
      */
-    public synchronized boolean awaitClose(long timeout, TimeUnit unit) throws InterruptedException {
-        if (closed) {
-            return true;
-        }
-        closed = true;
-
-        this.cancellableFlushTask.cancel();
-
-        if (bulkRequest.numberOfActions() > 0) {
-            execute();
-        }
+    public boolean awaitClose(long timeout, TimeUnit unit) throws InterruptedException {
+        lock.lock();
         try {
-            return this.bulkRequestHandler.awaitClose(timeout, unit);
+            if (closed) {
+                return true;
+            }
+            closed = true;
+
+            this.cancellableFlushTask.cancel();
+
+            if (bulkRequest.numberOfActions() > 0) {
+                execute();
+            }
+            try {
+                return this.bulkRequestHandler.awaitClose(timeout, unit);
+            } finally {
+                onClose.run();
+            }
         } finally {
-            onClose.run();
+            lock.unlock();
         }
     }
 
@@ -248,25 +295,21 @@ public class BulkProcessor implements Closeable {
      * (for example, if no id is provided, one will be generated, or usage of the create flag).
      */
     public BulkProcessor add(IndexRequest request) {
-        return add((DocWriteRequest) request);
+        return add((DocWriteRequest<?>) request);
     }
 
     /**
      * Adds an {@link DeleteRequest} to the list of actions to execute.
      */
     public BulkProcessor add(DeleteRequest request) {
-        return add((DocWriteRequest) request);
+        return add((DocWriteRequest<?>) request);
     }
 
     /**
      * Adds either a delete or an index request.
      */
-    public BulkProcessor add(DocWriteRequest request) {
-        return add(request, null);
-    }
-
-    public BulkProcessor add(DocWriteRequest request, @Nullable Object payload) {
-        internalAdd(request, payload);
+    public BulkProcessor add(DocWriteRequest<?> request) {
+        internalAdd(request);
         return this;
     }
 
@@ -280,10 +323,22 @@ public class BulkProcessor implements Closeable {
         }
     }
 
-    private synchronized void internalAdd(DocWriteRequest request, @Nullable Object payload) {
-        ensureOpen();
-        bulkRequest.add(request, payload);
-        executeIfNeeded();
+    private void internalAdd(DocWriteRequest<?> request) {
+        //bulkRequest and instance swapping is not threadsafe, so execute the mutations under a lock.
+        //once the bulk request is ready to be shipped swap the instance reference unlock and send the local reference to the handler.
+        Tuple<BulkRequest, Long> bulkRequestToExecute = null;
+        lock.lock();
+        try {
+            ensureOpen();
+            bulkRequest.add(request);
+            bulkRequestToExecute = newBulkRequestIfNeeded();
+        } finally {
+            lock.unlock();
+        }
+        //execute sending the local reference outside the lock to allow handler to control the concurrency via it's configuration.
+        if (bulkRequestToExecute != null) {
+            execute(bulkRequestToExecute.v1(), bulkRequestToExecute.v2());
+        }
     }
 
     /**
@@ -291,16 +346,29 @@ public class BulkProcessor implements Closeable {
      */
     public BulkProcessor add(BytesReference data, @Nullable String defaultIndex, @Nullable String defaultType,
                              XContentType xContentType) throws Exception {
-        return add(data, defaultIndex, defaultType, null, null, xContentType);
+        return add(data, defaultIndex, defaultType, null, xContentType);
     }
 
     /**
      * Adds the data from the bytes to be processed by the bulk processor
      */
-    public synchronized BulkProcessor add(BytesReference data, @Nullable String defaultIndex, @Nullable String defaultType,
-                                          @Nullable String defaultPipeline, @Nullable Object payload, XContentType xContentType) throws Exception {
-        bulkRequest.add(data, defaultIndex, defaultType, null, null, defaultPipeline, payload, true, xContentType);
-        executeIfNeeded();
+    public BulkProcessor add(BytesReference data, @Nullable String defaultIndex, @Nullable String defaultType,
+                                          @Nullable String defaultPipeline,
+                                          XContentType xContentType) throws Exception {
+        Tuple<BulkRequest, Long> bulkRequestToExecute = null;
+        lock.lock();
+        try {
+            ensureOpen();
+            bulkRequest.add(data, defaultIndex, defaultType, null, null, defaultPipeline,
+                true, xContentType);
+            bulkRequestToExecute = newBulkRequestIfNeeded();
+        } finally {
+            lock.unlock();
+        }
+
+        if (bulkRequestToExecute != null) {
+            execute(bulkRequestToExecute.v1(), bulkRequestToExecute.v2());
+        }
         return this;
     }
 
@@ -308,7 +376,9 @@ public class BulkProcessor implements Closeable {
         if (flushInterval == null) {
             return new Scheduler.Cancellable() {
                 @Override
-                public void cancel() {}
+                public boolean cancel() {
+                    return false;
+                }
 
                 @Override
                 public boolean isCancelled() {
@@ -320,23 +390,32 @@ public class BulkProcessor implements Closeable {
         return scheduler.scheduleWithFixedDelay(flushRunnable, flushInterval, ThreadPool.Names.GENERIC);
     }
 
-    private void executeIfNeeded() {
+    // needs to be executed under a lock
+    private Tuple<BulkRequest,Long> newBulkRequestIfNeeded(){
         ensureOpen();
         if (!isOverTheLimit()) {
-            return;
+            return null;
         }
-        execute();
+        final BulkRequest bulkRequest = this.bulkRequest;
+        this.bulkRequest = bulkRequestSupplier.get();
+        return new Tuple<>(bulkRequest,executionIdGen.incrementAndGet()) ;
     }
 
-    // (currently) needs to be executed under a lock
+    // may be executed without a lock
+    private void execute(BulkRequest bulkRequest, long executionId ){
+        this.bulkRequestHandler.execute(bulkRequest, executionId);
+    }
+
+    // needs to be executed under a lock
     private void execute() {
         final BulkRequest bulkRequest = this.bulkRequest;
         final long executionId = executionIdGen.incrementAndGet();
 
-        this.bulkRequest = new BulkRequest();
-        this.bulkRequestHandler.execute(bulkRequest, executionId);
+        this.bulkRequest = bulkRequestSupplier.get();
+        execute(bulkRequest, executionId);
     }
 
+    // needs to be executed under a lock
     private boolean isOverTheLimit() {
         if (bulkActions != -1 && bulkRequest.numberOfActions() >= bulkActions) {
             return true;
@@ -350,18 +429,23 @@ public class BulkProcessor implements Closeable {
     /**
      * Flush pending delete or index requests.
      */
-    public synchronized void flush() {
-        ensureOpen();
-        if (bulkRequest.numberOfActions() > 0) {
-            execute();
+    public void flush() {
+        lock.lock();
+        try {
+            ensureOpen();
+            if (bulkRequest.numberOfActions() > 0) {
+                execute();
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
     class Flush implements Runnable {
-
         @Override
         public void run() {
-            synchronized (BulkProcessor.this) {
+            lock.lock();
+            try {
                 if (closed) {
                     return;
                 }
@@ -369,6 +453,8 @@ public class BulkProcessor implements Closeable {
                     return;
                 }
                 execute();
+            } finally {
+                lock.unlock();
             }
         }
     }

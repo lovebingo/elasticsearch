@@ -13,36 +13,38 @@ import org.apache.http.client.CredentialsProvider;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.message.BasicHeader;
 import org.apache.http.nio.conn.ssl.SSLIOSessionStrategy;
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.Version;
+import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
-import org.elasticsearch.client.sniff.ElasticsearchHostsSniffer;
-import org.elasticsearch.client.sniff.ElasticsearchHostsSniffer.Scheme;
+import org.elasticsearch.client.sniff.ElasticsearchNodesSniffer;
 import org.elasticsearch.client.sniff.Sniffer;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
-import org.elasticsearch.common.collect.MapBuilder;
-import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsException;
+import org.elasticsearch.common.time.DateFormatter;
 import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.common.util.Maps;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.common.util.set.Sets;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.xpack.core.monitoring.exporter.MonitoringTemplateUtils;
+import org.elasticsearch.xpack.core.ssl.SSLConfiguration;
+import org.elasticsearch.xpack.core.ssl.SSLConfigurationSettings;
 import org.elasticsearch.xpack.core.ssl.SSLService;
 import org.elasticsearch.xpack.monitoring.exporter.ClusterAlertsUtil;
+import org.elasticsearch.xpack.monitoring.exporter.ExportBulk;
 import org.elasticsearch.xpack.monitoring.exporter.Exporter;
-import org.joda.time.format.DateTimeFormatter;
 
 import javax.net.ssl.SSLContext;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -53,6 +55,9 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import static java.util.Map.entry;
 
 /**
  * {@code HttpExporter} uses the low-level {@link RestClient} to connect to a user-specified set of nodes for exporting Monitoring
@@ -69,7 +74,7 @@ import java.util.function.Supplier;
  */
 public class HttpExporter extends Exporter {
 
-    private static final Logger logger = Loggers.getLogger(HttpExporter.class);
+    private static final Logger logger = LogManager.getLogger(HttpExporter.class);
 
     public static final String TYPE = "http";
 
@@ -164,7 +169,7 @@ public class HttpExporter extends Exporter {
     /**
      * Minimum supported version of the remote monitoring cluster (same major).
      */
-    public static final Version MIN_SUPPORTED_CLUSTER_VERSION = Version.V_7_0_0_alpha1;
+    public static final Version MIN_SUPPORTED_CLUSTER_VERSION = Version.V_7_0_0;
 
     /**
      * The {@link RestClient} automatically pools connections and keeps them alive as necessary.
@@ -191,7 +196,7 @@ public class HttpExporter extends Exporter {
     private final AtomicBoolean clusterAlertsAllowed = new AtomicBoolean(false);
 
     private final ThreadContext threadContext;
-    private final DateTimeFormatter dateTimeFormatter;
+    private final DateFormatter dateTimeFormatter;
 
     /**
      * Create an {@link HttpExporter}.
@@ -256,6 +261,30 @@ public class HttpExporter extends Exporter {
     }
 
     /**
+     * Adds a validator for the {@link #SSL_SETTING} to prevent dynamic updates when secure settings also exist within that setting
+     * groups (ssl context).
+     * Because it is not possible to re-read the secure settings during a dynamic update, we cannot rebuild the {@link SSLIOSessionStrategy}
+     * (see {@link #configureSecurity(RestClientBuilder, Config, SSLService)} if this exporter has been configured with secure settings
+     */
+    public static void registerSettingValidators(ClusterService clusterService) {
+        clusterService.getClusterSettings().addAffixUpdateConsumer(SSL_SETTING,
+            (ignoreKey, ignoreSettings) -> {
+            // no-op update. We only care about the validator
+            },
+            (namespace, settings) -> {
+                final List<String> secureSettings = SSLConfigurationSettings.withoutPrefix()
+                    .getSecureSettingsInUse(settings)
+                    .stream()
+                    .map(Setting::getKey)
+                    .collect(Collectors.toList());
+                if (secureSettings.isEmpty() == false) {
+                    throw new IllegalStateException("Cannot dynamically update SSL settings for the exporter [" + namespace
+                        + "] as it depends on the secure setting(s) [" + Strings.collectionToCommaDelimitedString(secureSettings) + "]");
+                }
+            });
+    }
+
+    /**
      * Create a {@link RestClientBuilder} from the HTTP Exporter's {@code config}.
      *
      * @param config The HTTP Exporter's configuration
@@ -305,11 +334,12 @@ public class HttpExporter extends Exporter {
         if (sniffingEnabled) {
             final List<String> hosts = HOST_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings());
             // createHosts(config) ensures that all schemes are the same for all hosts!
-            final Scheme scheme = hosts.get(0).startsWith("https") ? Scheme.HTTPS : Scheme.HTTP;
-            final ElasticsearchHostsSniffer hostsSniffer =
-                    new ElasticsearchHostsSniffer(client, ElasticsearchHostsSniffer.DEFAULT_SNIFF_REQUEST_TIMEOUT, scheme);
+            final ElasticsearchNodesSniffer.Scheme scheme = hosts.get(0).startsWith("https") ?
+                    ElasticsearchNodesSniffer.Scheme.HTTPS : ElasticsearchNodesSniffer.Scheme.HTTP;
+            final ElasticsearchNodesSniffer hostsSniffer =
+                    new ElasticsearchNodesSniffer(client, ElasticsearchNodesSniffer.DEFAULT_SNIFF_REQUEST_TIMEOUT, scheme);
 
-            sniffer = Sniffer.builder(client).setHostsSniffer(hostsSniffer).build();
+            sniffer = Sniffer.builder(client).setNodesSniffer(hostsSniffer).build();
 
             // inform the sniffer whenever there's a node failure
             listener.setSniffer(sniffer);
@@ -352,7 +382,7 @@ public class HttpExporter extends Exporter {
      * @throws SettingsException if any setting is malformed or if no host is set
      */
     private static HttpHost[] createHosts(final Config config) {
-        final List<String> hosts = HOST_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings());;
+        final List<String> hosts = HOST_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings());
         String configKey = HOST_SETTING.getConcreteSettingForNamespace(config.name()).getKey();
 
         if (hosts.isEmpty()) {
@@ -445,10 +475,22 @@ public class HttpExporter extends Exporter {
      * @throws SettingsException if any setting causes issues
      */
     private static void configureSecurity(final RestClientBuilder builder, final Config config, final SSLService sslService) {
-        final Settings sslSettings = SSL_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings());
-        final SSLIOSessionStrategy sslStrategy = sslService.sslIOSessionStrategy(sslSettings);
+        final Setting<Settings> concreteSetting = SSL_SETTING.getConcreteSettingForNamespace(config.name());
+        final Settings sslSettings = concreteSetting.get(config.settings());
+        final SSLIOSessionStrategy sslStrategy;
+        if (SSLConfigurationSettings.withoutPrefix().getSecureSettingsInUse(sslSettings).isEmpty()) {
+            // This configuration does not use secure settings, so it is possible that is has been dynamically updated.
+            // We need to load a new SSL strategy in case these settings differ from the ones that the SSL service was configured with.
+            sslStrategy = sslService.sslIOSessionStrategy(sslSettings);
+        } else {
+            // This configuration uses secure settings. We cannot load a new SSL strategy, as the secure settings have already been closed.
+            // Due to #registerSettingValidators we know that the settings not been dynamically updated, and the pre-configured strategy
+            // is still the correct configuration for use in this exporter.
+            final SSLConfiguration sslConfiguration = sslService.getSSLConfiguration(concreteSetting.getKey());
+            sslStrategy = sslService.sslIOSessionStrategy(sslConfiguration);
+        }
         final CredentialsProvider credentialsProvider = createCredentialsProvider(config);
-        List<String> hostList = HOST_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings());;
+        List<String> hostList = HOST_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings());
         // sending credentials in plaintext!
         if (credentialsProvider != null && hostList.stream().findFirst().orElse("").startsWith("https") == false) {
             logger.warn("exporter [{}] is not using https, but using user authentication with plaintext " +
@@ -515,21 +557,21 @@ public class HttpExporter extends Exporter {
     static Map<String, String> createDefaultParams(final Config config) {
         final TimeValue bulkTimeout = BULK_TIMEOUT_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings());
 
-        final MapBuilder<String, String> params = new MapBuilder<>();
+        final var entries = new ArrayList<Map.Entry<String, String>>(3);
 
         if (TimeValue.MINUS_ONE.equals(bulkTimeout) == false) {
-            params.put("timeout", bulkTimeout.toString());
+            entries.add(entry("timeout", bulkTimeout.toString()));
         }
 
         // allow the use of ingest pipelines to be completely optional
         if (USE_INGEST_PIPELINE_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings())) {
-            params.put("pipeline", MonitoringTemplateUtils.pipelineName(MonitoringTemplateUtils.TEMPLATE_VERSION));
+            entries.add(entry("pipeline", MonitoringTemplateUtils.pipelineName(MonitoringTemplateUtils.TEMPLATE_VERSION)));
         }
 
         // widdle down the response to just what we care to check
-        params.put("filter_path", "errors,items.*.error");
+        entries.add(entry("filter_path", "errors,items.*.error"));
 
-        return params.immutableMap();
+        return Maps.ofEntries(entries);
     }
 
     /**
@@ -553,7 +595,8 @@ public class HttpExporter extends Exporter {
             resources.add(new TemplateHttpResource(resourceOwnerName, templateTimeout, templateName, templateLoader));
         }
 
-        // add old templates, like ".monitoring-data-2" and ".monitoring-es-2" so that other versions can continue to work
+        // Add dummy templates (e.g. ".monitoring-es-6") to enable the ability to check which version of the actual
+        // index template (e.g. ".monitoring-es") should be applied.
         boolean createLegacyTemplates =
                 TEMPLATE_CREATE_LEGACY_VERSIONS_SETTING.getConcreteSettingForNamespace(config.name()).get(config.settings());
         if (createLegacyTemplates) {
@@ -624,12 +667,8 @@ public class HttpExporter extends Exporter {
         }
     }
 
-    /**
-     * Determine if this {@link HttpExporter} is ready to use.
-     *
-     * @return {@code true} if it is ready. {@code false} if not.
-     */
-    boolean isExporterReady() {
+    @Override
+    public void openBulk(final ActionListener<ExportBulk> listener) {
         final boolean canUseClusterAlerts = config.licenseState().isMonitoringClusterAlertsAllowed();
 
         // if this changes between updates, then we need to add OR remove the watches
@@ -637,19 +676,16 @@ public class HttpExporter extends Exporter {
             resource.markDirty();
         }
 
-        // block until all resources are verified to exist
-        return resource.checkAndPublishIfDirty(client);
-    }
+        resource.checkAndPublishIfDirty(client, ActionListener.wrap((success) -> {
+            if (success) {
+                final String name = "xpack.monitoring.exporters." + config.name();
 
-    @Override
-    public HttpExportBulk openBulk() {
-        // block until all resources are verified to exist
-        if (isExporterReady()) {
-            String name = "xpack.monitoring.exporters." + config.name();
-            return new HttpExportBulk(name, client, defaultParams, dateTimeFormatter, threadContext);
-        }
-
-        return null;
+                listener.onResponse(new HttpExportBulk(name, client, defaultParams, dateTimeFormatter, threadContext));
+            } else {
+                // we're not ready yet, so keep waiting
+                listener.onResponse(null);
+            }
+        }, listener::onFailure));
     }
 
     @Override
@@ -658,12 +694,12 @@ public class HttpExporter extends Exporter {
             if (sniffer != null) {
                 sniffer.close();
             }
-        } catch (IOException | RuntimeException e) {
+        } catch (Exception e) {
             logger.error("an error occurred while closing the internal client sniffer", e);
         } finally {
             try {
                 client.close();
-            } catch (IOException | RuntimeException e) {
+            } catch (Exception e) {
                 logger.error("an error occurred while closing the internal client", e);
             }
         }

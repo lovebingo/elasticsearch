@@ -3,6 +3,13 @@
 
 import org.elasticsearch.gradle.test.RestIntegTestTask
 
+apply plugin: 'elasticsearch.build'
+test.enabled = false
+
+dependencies {
+  compile project(':test:framework')
+}
+
 subprojects {
   // HACK: please fix this
   // we want to add the rest api specs for xpack to qa tests, but we
@@ -15,18 +22,6 @@ subprojects {
     File xpackResources = new File(xpackProject('plugin').projectDir, 'src/test/resources')
     project.copyRestSpec.from(xpackResources) {
       include 'rest-api-spec/api/**'
-    }
-  }
-}
-
-/* Remove assemble on all qa projects because we don't need to publish
- * artifacts for them. */
-gradle.projectsEvaluated {
-  subprojects {
-    Task assemble = project.tasks.findByName('assemble')
-    if (assemble) {
-      project.tasks.remove(assemble)
-      project.build.dependsOn.remove('assemble')
     }
   }
 }

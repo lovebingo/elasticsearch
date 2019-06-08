@@ -7,16 +7,14 @@ package org.elasticsearch.smoketest;
 
 import com.carrotsearch.randomizedtesting.annotations.Name;
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
-import org.apache.http.entity.ContentType;
-import org.apache.http.entity.StringEntity;
-import org.elasticsearch.client.Response;
+import org.elasticsearch.client.Request;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.test.rest.yaml.ClientYamlTestCandidate;
 import org.elasticsearch.test.rest.yaml.ClientYamlTestResponse;
 import org.elasticsearch.test.rest.yaml.ESClientYamlSuiteTestCase;
-import org.elasticsearch.xpack.core.watcher.support.WatcherIndexTemplateRegistryField;
+import org.elasticsearch.xpack.test.rest.XPackRestTestConstants;
 import org.junit.After;
 import org.junit.Before;
 
@@ -25,7 +23,7 @@ import java.util.Collections;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
-import static org.elasticsearch.xpack.core.security.authc.support.UsernamePasswordToken.basicAuthHeaderValue;
+import static org.elasticsearch.xpack.test.SecuritySettingsSourceField.basicAuthHeaderValue;
 import static org.hamcrest.Matchers.is;
 
 public class SmokeTestWatcherWithSecurityClientYamlTestSuiteIT extends ESClientYamlSuiteTestCase {
@@ -49,22 +47,22 @@ public class SmokeTestWatcherWithSecurityClientYamlTestSuiteIT extends ESClientY
                 emptyList(), emptyMap());
 
         // create one document in this index, so we can test in the YAML tests, that the index cannot be accessed
-        Response resp = adminClient().performRequest("PUT", "/index_not_allowed_to_read/doc/1", Collections.emptyMap(),
-                new StringEntity("{\"foo\":\"bar\"}", ContentType.APPLICATION_JSON));
-        assertThat(resp.getStatusLine().getStatusCode(), is(201));
+        Request request = new Request("PUT", "/index_not_allowed_to_read/_doc/1");
+        request.setJsonEntity("{\"foo\":\"bar\"}");
+        adminClient().performRequest(request);
 
         assertBusy(() -> {
             ClientYamlTestResponse response =
-                    getAdminExecutionContext().callApi("xpack.watcher.stats", emptyMap(), emptyList(), emptyMap());
+                    getAdminExecutionContext().callApi("watcher.stats", emptyMap(), emptyList(), emptyMap());
             String state = (String) response.evaluate("stats.0.watcher_state");
 
             switch (state) {
                 case "stopped":
                     ClientYamlTestResponse startResponse =
-                            getAdminExecutionContext().callApi("xpack.watcher.start", emptyMap(), emptyList(), emptyMap());
+                            getAdminExecutionContext().callApi("watcher.start", emptyMap(), emptyList(), emptyMap());
                     boolean isAcknowledged = (boolean) startResponse.evaluate("acknowledged");
                     assertThat(isAcknowledged, is(true));
-                    break;
+                    throw new AssertionError("waiting until stopped state reached started state");
                 case "stopping":
                     throw new AssertionError("waiting until stopping state reached stopped state to start again");
                 case "starting":
@@ -78,7 +76,7 @@ public class SmokeTestWatcherWithSecurityClientYamlTestSuiteIT extends ESClientY
         });
 
         assertBusy(() -> {
-            for (String template : WatcherIndexTemplateRegistryField.TEMPLATE_NAMES) {
+            for (String template : XPackRestTestConstants.TEMPLATE_NAMES_NO_ILM) {
                 ClientYamlTestResponse templateExistsResponse = getAdminExecutionContext().callApi("indices.exists_template",
                         singletonMap("name", template), emptyList(), emptyMap());
                 assertThat(templateExistsResponse.getStatusCode(), is(200));
@@ -90,7 +88,7 @@ public class SmokeTestWatcherWithSecurityClientYamlTestSuiteIT extends ESClientY
     public void stopWatcher() throws Exception {
         assertBusy(() -> {
             ClientYamlTestResponse response =
-                    getAdminExecutionContext().callApi("xpack.watcher.stats", emptyMap(), emptyList(), emptyMap());
+                    getAdminExecutionContext().callApi("watcher.stats", emptyMap(), emptyList(), emptyMap());
             String state = (String) response.evaluate("stats.0.watcher_state");
 
             switch (state) {
@@ -103,10 +101,10 @@ public class SmokeTestWatcherWithSecurityClientYamlTestSuiteIT extends ESClientY
                     throw new AssertionError("waiting until starting state reached started state to stop");
                 case "started":
                     ClientYamlTestResponse stopResponse =
-                            getAdminExecutionContext().callApi("xpack.watcher.stop", emptyMap(), emptyList(), emptyMap());
+                            getAdminExecutionContext().callApi("watcher.stop", emptyMap(), emptyList(), emptyMap());
                     boolean isAcknowledged = (boolean) stopResponse.evaluate("acknowledged");
                     assertThat(isAcknowledged, is(true));
-                    break;
+                    throw new AssertionError("waiting until started state reached stopped state");
                 default:
                     throw new AssertionError("unknown state[" + state + "]");
             }
@@ -129,4 +127,3 @@ public class SmokeTestWatcherWithSecurityClientYamlTestSuiteIT extends ESClientY
             .build();
     }
 }
-

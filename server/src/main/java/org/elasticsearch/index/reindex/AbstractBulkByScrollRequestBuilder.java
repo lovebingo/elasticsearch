@@ -31,11 +31,11 @@ import org.elasticsearch.index.query.QueryBuilder;
 public abstract class AbstractBulkByScrollRequestBuilder<
                 Request extends AbstractBulkByScrollRequest<Request>,
                 Self extends AbstractBulkByScrollRequestBuilder<Request, Self>>
-        extends ActionRequestBuilder<Request, BulkByScrollResponse, Self> {
+        extends ActionRequestBuilder<Request, BulkByScrollResponse> {
     private final SearchRequestBuilder source;
 
     protected AbstractBulkByScrollRequestBuilder(ElasticsearchClient client,
-            Action<Request, BulkByScrollResponse, Self> action, SearchRequestBuilder source, Request request) {
+                                                 Action<BulkByScrollResponse> action, SearchRequestBuilder source, Request request) {
         super(client, action, request);
         this.source = source;
     }
@@ -67,15 +67,27 @@ public abstract class AbstractBulkByScrollRequestBuilder<
     }
 
     /**
-     * The maximum number of documents to attempt.
+     * Maximum number of processed documents. Defaults to processing all
+     * documents.
+     * @deprecated please use maxDocs(int) instead.
      */
+    @Deprecated
     public Self size(int size) {
-        request.setSize(size);
+        return maxDocs(size);
+    }
+
+
+    /**
+     * Maximum number of processed documents. Defaults to processing all
+     * documents.
+     */
+    public Self maxDocs(int maxDocs) {
+        request.setMaxDocs(maxDocs);
         return self();
     }
 
     /**
-     * Should we version conflicts cause the action to abort?
+     * Set whether or not version conflicts cause the action to abort.
      */
     public Self abortOnVersionConflict(boolean abortOnVersionConflict) {
         request.setAbortOnVersionConflict(abortOnVersionConflict);

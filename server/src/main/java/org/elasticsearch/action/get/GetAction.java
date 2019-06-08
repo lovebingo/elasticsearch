@@ -20,9 +20,9 @@
 package org.elasticsearch.action.get;
 
 import org.elasticsearch.action.Action;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.common.io.stream.Writeable;
 
-public class GetAction extends Action<GetRequest, GetResponse, GetRequestBuilder> {
+public class GetAction extends Action<GetResponse> {
 
     public static final GetAction INSTANCE = new GetAction();
     public static final String NAME = "indices:data/read/get";
@@ -33,11 +33,11 @@ public class GetAction extends Action<GetRequest, GetResponse, GetRequestBuilder
 
     @Override
     public GetResponse newResponse() {
-        return new GetResponse();
+        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
     }
 
     @Override
-    public GetRequestBuilder newRequestBuilder(ElasticsearchClient client) {
-        return new GetRequestBuilder(client, this);
+    public Writeable.Reader<GetResponse> getResponseReader() {
+        return GetResponse::new;
     }
 }

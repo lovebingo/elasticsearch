@@ -3,8 +3,10 @@
 
 include::../Versions.asciidoc[]
 
-include::painless-getting-started.asciidoc[]
+include::painless-guide.asciidoc[]
 
 include::painless-lang-spec.asciidoc[]
+
+include::painless-contexts.asciidoc[]
 
 include::painless-api-reference.asciidoc[]

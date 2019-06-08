@@ -61,6 +61,7 @@ setup() {
             [ ! -d "$ESHOME" ]; then
         clean_before_test
         install
+        set_debug_logging
     fi
 }
 
@@ -91,11 +92,14 @@ fi
 
 @test "[$GROUP] install a sample plugin with a symlinked plugins path" {
     # Clean up after the last time this test was run
-    rm -rf /tmp/plugins.*
-    rm -rf /tmp/old_plugins.*
+    rm -rf /var/plugins.*
+    rm -rf /var/old_plugins.*
 
     rm -rf "$ESPLUGINS"
-    local es_plugins=$(mktemp -d -t 'plugins.XXXX')
+    # The custom plugins directory is not under /tmp or /var/tmp because
+    # systemd's private temp directory functionally means different
+    # processes can have different views of what's in these directories
+    local es_plugins=$(mktemp -p /var -d -t 'plugins.XXXX')
     chown -R elasticsearch:elasticsearch "$es_plugins"
     ln -s "$es_plugins" "$ESPLUGINS"
 
@@ -158,22 +162,6 @@ fi
     remove_plugin_example
 }
 
-@test "[$GROUP] fail if java executable is not found" {
-  [ "$GROUP" == "TAR PLUGINS" ] || skip "Test case only supported by TAR PLUGINS"
-  local JAVA=$(which java)
-
-  sudo chmod -x $JAVA
-  run "$ESHOME/bin/elasticsearch-plugin"
-  sudo chmod +x $JAVA
-
-  [ "$status" -eq 1 ]
-  local expected="could not find java; set JAVA_HOME or ensure java is in PATH"
-  [[ "$output" == *"$expected"* ]] || {
-    echo "Expected error message [$expected] but found: $output"
-    false
-  }
-}
-
 # Note that all of the tests from here to the end of the file expect to be run
 # in sequence and don't take well to being run one at a time.
 @test "[$GROUP] install a sample plugin" {
@@ -220,27 +208,23 @@ fi
     install_and_check_plugin discovery ec2 aws-java-sdk-core-*.jar
 }
 
-@test "[$GROUP] install discovery-file plugin" {
-    install_and_check_plugin discovery file
-}
-
 @test "[$GROUP] install ingest-attachment plugin" {
-    # we specify the version on the poi-3.17.jar so that the test does
+    # we specify the version on the poi-4.0.0.jar so that the test does
     # not spuriously pass if the jar is missing but the other poi jars
     # are present
-    install_and_check_plugin ingest attachment bcprov-jdk15on-*.jar tika-core-*.jar pdfbox-*.jar poi-3.17.jar poi-ooxml-3.17.jar poi-ooxml-schemas-*.jar poi-scratchpad-*.jar
-}
-
-@test "[$GROUP] install ingest-geoip plugin" {
-    install_and_check_plugin ingest geoip geoip2-*.jar jackson-annotations-*.jar jackson-databind-*.jar maxmind-db-*.jar
-}
-
-@test "[$GROUP] install ingest-user-agent plugin" {
-    install_and_check_plugin ingest user-agent
+    install_and_check_plugin ingest attachment bcprov-jdk15on-*.jar tika-core-*.jar pdfbox-*.jar poi-4.0.0.jar poi-ooxml-4.0.0.jar poi-ooxml-schemas-*.jar poi-scratchpad-*.jar
 }
 
 @test "[$GROUP] check ingest-common module" {
     check_module ingest-common jcodings-*.jar joni-*.jar
+}
+
+@test "[$GROUP] check ingest-geoip module" {
+    check_module ingest-geoip geoip2-*.jar jackson-annotations-*.jar jackson-databind-*.jar maxmind-db-*.jar
+}
+
+@test "[$GROUP] check ingest-user-agent module" {
+    check_module ingest-user-agent
 }
 
 @test "[$GROUP] check lang-expression module" {
@@ -260,6 +244,10 @@ fi
 
 @test "[$GROUP] install murmur3 mapper plugin" {
     install_and_check_plugin mapper murmur3
+}
+
+@test "[$GROUP] install annotated-text mapper plugin" {
+    install_and_check_plugin mapper annotated-text
 }
 
 @test "[$GROUP] check reindex module" {
@@ -356,24 +344,16 @@ fi
     remove_plugin discovery-ec2
 }
 
-@test "[$GROUP] remove discovery-file plugin" {
-    remove_plugin discovery-file
-}
-
 @test "[$GROUP] remove ingest-attachment plugin" {
     remove_plugin ingest-attachment
 }
 
-@test "[$GROUP] remove ingest-geoip plugin" {
-    remove_plugin ingest-geoip
-}
-
-@test "[$GROUP] remove ingest-user-agent plugin" {
-    remove_plugin ingest-user-agent
-}
-
 @test "[$GROUP] remove murmur3 mapper plugin" {
     remove_plugin mapper-murmur3
+}
+
+@test "[$GROUP] remove annotated-text mapper plugin" {
+    remove_plugin mapper-annotated-text
 }
 
 @test "[$GROUP] remove size mapper plugin" {
@@ -450,7 +430,7 @@ fi
     local java_home=$JAVA_HOME
 
     # create a JAVA_HOME with a space
-    local java=$(which java)
+    local java="$SYSTEM_JAVA_HOME"/bin/java
     local temp=`mktemp -d --suffix="java home"`
     mkdir -p "$temp/bin"
     ln -s "$java" "$temp/bin/java"

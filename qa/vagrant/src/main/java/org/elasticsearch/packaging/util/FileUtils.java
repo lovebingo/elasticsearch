@@ -20,21 +20,31 @@
 package org.elasticsearch.packaging.util;
 
 import org.elasticsearch.core.internal.io.IOUtils;
+import org.hamcrest.FeatureMatcher;
+import org.hamcrest.Matcher;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileOwnerAttributeView;
 import java.nio.file.attribute.PosixFileAttributes;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.emptyIterable;
 import static org.hamcrest.core.IsNot.not;
 import static org.hamcrest.text.IsEmptyString.isEmptyOrNullString;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Wrappers and convenience methods for common filesystem operations
@@ -63,6 +73,31 @@ public class FileUtils {
         }
     }
 
+    public static Path mktempDir(Path path) {
+        try {
+            return Files.createTempDirectory(path,"tmp");
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    public static Path mkdir(Path path) {
+        try {
+            return Files.createDirectories(path);
+         } catch (IOException e) {
+            throw new RuntimeException(e);
+         }
+     }
+
+     public static Path cp(Path source, Path target) {
+        try {
+            return Files.copy(source, target);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static Path mv(Path source, Path target) {
         try {
             return Files.move(source, target);
@@ -71,9 +106,19 @@ public class FileUtils {
         }
     }
 
+    public static void append(Path file, String text) {
+        try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
+            StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+
+            writer.write(text);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static String slurp(Path file) {
         try {
-            return String.join("\n", Files.readAllLines(file));
+            return String.join("\n", Files.readAllLines(file, StandardCharsets.UTF_8));
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -130,5 +175,35 @@ public class FileUtils {
         String fromEnv = System.getenv("PACKAGING_ARCHIVES");
         assertThat(fromEnv, not(isEmptyOrNullString()));
         return Paths.get(fromEnv);
+    }
+
+    public static Path getDistributionFile(Distribution distribution) {
+        return getDistributionFile(distribution, getCurrentVersion());
+    }
+
+    public static Path getDistributionFile(Distribution distribution, String version) {
+        return getPackagingArchivesDir().resolve(distribution.filename(version));
+    }
+
+    public static void assertPathsExist(Path... paths) {
+        Arrays.stream(paths).forEach(path -> assertTrue(path + " should exist", Files.exists(path)));
+    }
+
+    public static Matcher<Path> fileWithGlobExist(String glob) throws IOException {
+        return new FeatureMatcher<Path,Iterable<Path>>(not(emptyIterable()),"File with pattern exist", "file with pattern"){
+
+            @Override
+            protected Iterable<Path> featureValueOf(Path actual) {
+                try {
+                    return Files.newDirectoryStream(actual,glob);
+                } catch (IOException e) {
+                    return Collections.emptyList();
+                }
+            }
+        };
+    }
+
+    public static void assertPathsDontExist(Path... paths) {
+        Arrays.stream(paths).forEach(path -> assertFalse(path + " should not exist", Files.exists(path)));
     }
 }

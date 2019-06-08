@@ -19,12 +19,13 @@
 
 package org.elasticsearch.index;
 
-import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.search.similarities.BM25Similarity;
+import org.apache.lucene.search.similarities.Similarity;
+import org.apache.lucene.store.MMapDirectory;
+import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.SetOnce;
 import org.elasticsearch.Version;
 import org.elasticsearch.client.Client;
-import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.TriFunction;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.Setting;
@@ -44,11 +45,13 @@ import org.elasticsearch.index.shard.IndexSearcherWrapper;
 import org.elasticsearch.index.shard.IndexingOperationListener;
 import org.elasticsearch.index.shard.SearchOperationListener;
 import org.elasticsearch.index.similarity.SimilarityService;
-import org.elasticsearch.index.store.IndexStore;
+import org.elasticsearch.index.store.DirectoryService;
+import org.elasticsearch.index.store.FsDirectoryFactory;
 import org.elasticsearch.indices.IndicesQueryCache;
 import org.elasticsearch.indices.breaker.CircuitBreakerService;
 import org.elasticsearch.indices.fielddata.cache.IndicesFieldDataCache;
 import org.elasticsearch.indices.mapper.MapperRegistry;
+import org.elasticsearch.plugins.IndexStorePlugin;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.threadpool.ThreadPool;
 
@@ -58,8 +61,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiFunction;
@@ -73,7 +76,7 @@ import java.util.function.Function;
  *     {@link #addSimilarity(String, TriFunction)} while existing Providers can be referenced through Settings under the
  *     {@link IndexModule#SIMILARITY_SETTINGS_PREFIX} prefix along with the "type" value.  For example, to reference the
  *     {@link BM25Similarity}, the configuration {@code "index.similarity.my_similarity.type : "BM25"} can be used.</li>
- *      <li>{@link IndexStore} - Custom {@link IndexStore} instances can be registered via {@link #addIndexStore(String, Function)}</li>
+ *      <li>{@link DirectoryService} - Custom {@link DirectoryService} instances can be registered via {@link IndexStorePlugin}</li>
  *      <li>{@link IndexEventListener} - Custom {@link IndexEventListener} instances can be registered via
  *      {@link #addIndexEventListener(IndexEventListener)}</li>
  *      <li>Settings update listener - Custom settings update listener can be registered via
@@ -82,8 +85,12 @@ import java.util.function.Function;
  */
 public final class IndexModule {
 
+    public static final Setting<Boolean> NODE_STORE_ALLOW_MMAP = Setting.boolSetting("node.store.allow_mmap", true, Property.NodeScope);
+
+    private static final FsDirectoryFactory DEFAULT_DIRECTORY_FACTORY = new FsDirectoryFactory();
+
     public static final Setting<String> INDEX_STORE_TYPE_SETTING =
-        new Setting<>("index.store.type", "", Function.identity(), Property.IndexScope, Property.NodeScope);
+            new Setting<>("index.store.type", "", Function.identity(), Property.IndexScope, Property.NodeScope);
 
     /** On which extensions to load data into the file-system cache upon opening of files.
      *  This only works with the mmap directory, and even in that case is still
@@ -104,22 +111,36 @@ public final class IndexModule {
 
     private final IndexSettings indexSettings;
     private final AnalysisRegistry analysisRegistry;
-    // pkg private so tests can mock
-    final SetOnce<EngineFactory> engineFactory = new SetOnce<>();
+    private final EngineFactory engineFactory;
     private SetOnce<IndexSearcherWrapperFactory> indexSearcherWrapper = new SetOnce<>();
     private final Set<IndexEventListener> indexEventListeners = new HashSet<>();
     private final Map<String, TriFunction<Settings, Version, ScriptService, Similarity>> similarities = new HashMap<>();
-    private final Map<String, Function<IndexSettings, IndexStore>> storeTypes = new HashMap<>();
+    private final Map<String, IndexStorePlugin.DirectoryFactory> directoryFactories;
     private final SetOnce<BiFunction<IndexSettings, IndicesQueryCache, QueryCache>> forceQueryCacheProvider = new SetOnce<>();
     private final List<SearchOperationListener> searchOperationListeners = new ArrayList<>();
     private final List<IndexingOperationListener> indexOperationListeners = new ArrayList<>();
     private final AtomicBoolean frozen = new AtomicBoolean(false);
 
-    public IndexModule(IndexSettings indexSettings, AnalysisRegistry analysisRegistry) {
+    /**
+     * Construct the index module for the index with the specified index settings. The index module contains extension points for plugins
+     * via {@link org.elasticsearch.plugins.PluginsService#onIndexModule(IndexModule)}.
+     *
+     * @param indexSettings       the index settings
+     * @param analysisRegistry    the analysis registry
+     * @param engineFactory       the engine factory
+     * @param directoryFactories the available store types
+     */
+    public IndexModule(
+            final IndexSettings indexSettings,
+            final AnalysisRegistry analysisRegistry,
+            final EngineFactory engineFactory,
+            final Map<String, IndexStorePlugin.DirectoryFactory> directoryFactories) {
         this.indexSettings = indexSettings;
         this.analysisRegistry = analysisRegistry;
+        this.engineFactory = Objects.requireNonNull(engineFactory);
         this.searchOperationListeners.add(new SearchSlowLog(indexSettings));
         this.indexOperationListeners.add(new IndexingSlowLog(indexSettings));
+        this.directoryFactories = Collections.unmodifiableMap(directoryFactories);
     }
 
     /**
@@ -156,6 +177,15 @@ public final class IndexModule {
      */
     public Index getIndex() {
         return indexSettings.getIndex();
+    }
+
+    /**
+     * The engine factory provided during construction of this index module.
+     *
+     * @return the engine factory
+     */
+    EngineFactory getEngineFactory() {
+        return engineFactory;
     }
 
     /**
@@ -228,25 +258,6 @@ public final class IndexModule {
     }
 
     /**
-     * Adds an {@link IndexStore} type to this index module. Typically stores are registered with a reference to
-     * it's constructor:
-     * <pre>
-     *     indexModule.addIndexStore("my_store_type", MyStore::new);
-     * </pre>
-     *
-     * @param type the type to register
-     * @param provider the instance provider / factory method
-     */
-    public void addIndexStore(String type, Function<IndexSettings, IndexStore> provider) {
-        ensureNotFrozen();
-        if (storeTypes.containsKey(type)) {
-            throw new IllegalArgumentException("key [" + type +"] already registered");
-        }
-        storeTypes.put(type, provider);
-    }
-
-
-    /**
      * Registers the given {@link Similarity} with the given name.
      * The function takes as parameters:<ul>
      *   <li>settings for this similarity
@@ -283,7 +294,7 @@ public final class IndexModule {
         }
     }
 
-    private static boolean isBuiltinType(String storeType) {
+    public static boolean isBuiltinType(String storeType) {
         for (Type type : Type.values()) {
             if (type.match(storeType)) {
                 return true;
@@ -292,21 +303,49 @@ public final class IndexModule {
         return false;
     }
 
+
     public enum Type {
-        NIOFS,
-        MMAPFS,
-        SIMPLEFS,
-        FS;
+        HYBRIDFS("hybridfs"),
+        NIOFS("niofs"),
+        MMAPFS("mmapfs"),
+        SIMPLEFS("simplefs"),
+        FS("fs");
+
+        private final String settingsKey;
+
+        Type(final String settingsKey) {
+            this.settingsKey = settingsKey;
+        }
+
+        private static final Map<String, Type> TYPES;
+
+        static {
+            final Map<String, Type> types = new HashMap<>(4);
+            for (final Type type : values()) {
+                types.put(type.settingsKey, type);
+            }
+            TYPES = Collections.unmodifiableMap(types);
+        }
 
         public String getSettingsKey() {
-            return this.name().toLowerCase(Locale.ROOT);
+            return this.settingsKey;
         }
+
+        public static Type fromSettingsKey(final String key) {
+            final Type type = TYPES.get(key);
+            if (type == null) {
+                throw new IllegalArgumentException("no matching store type for [" + key + "]");
+            }
+            return type;
+        }
+
         /**
          * Returns true iff this settings matches the type.
          */
         public boolean match(String setting) {
             return getSettingsKey().equals(setting);
         }
+
     }
 
     /**
@@ -319,7 +358,18 @@ public final class IndexModule {
         IndexSearcherWrapper newWrapper(IndexService indexService);
     }
 
+    public static Type defaultStoreType(final boolean allowMmap) {
+        if (allowMmap && Constants.JRE_IS_64BIT && MMapDirectory.UNMAP_SUPPORTED) {
+            return Type.HYBRIDFS;
+        } else if (Constants.WINDOWS) {
+            return Type.SIMPLEFS;
+        } else {
+            return Type.NIOFS;
+        }
+    }
+
     public IndexService newIndexService(
+            IndexService.IndexCreationContext indexCreationContext,
             NodeEnvironment environment,
             NamedXContentRegistry xContentRegistry,
             IndexService.ShardStoreDeleter shardStoreDeleter,
@@ -337,20 +387,7 @@ public final class IndexModule {
         IndexSearcherWrapperFactory searcherWrapperFactory = indexSearcherWrapper.get() == null
             ? (shard) -> null : indexSearcherWrapper.get();
         eventListener.beforeIndexCreated(indexSettings.getIndex(), indexSettings.getSettings());
-        final String storeType = indexSettings.getValue(INDEX_STORE_TYPE_SETTING);
-        final IndexStore store;
-        if (Strings.isEmpty(storeType) || isBuiltinType(storeType)) {
-            store = new IndexStore(indexSettings);
-        } else {
-            Function<IndexSettings, IndexStore> factory = storeTypes.get(storeType);
-            if (factory == null) {
-                throw new IllegalArgumentException("Unknown store type [" + storeType + "]");
-            }
-            store = factory.apply(indexSettings);
-            if (store == null) {
-                throw new IllegalStateException("store must not be null");
-            }
-        }
+        final IndexStorePlugin.DirectoryFactory directoryFactory = getDirectoryFactory(indexSettings, directoryFactories);
         final QueryCache queryCache;
         if (indexSettings.getValue(INDEX_QUERY_CACHE_ENABLED_SETTING)) {
             BiFunction<IndexSettings, IndicesQueryCache, QueryCache> queryCacheProvider = forceQueryCacheProvider.get();
@@ -362,11 +399,40 @@ public final class IndexModule {
         } else {
             queryCache = new DisabledQueryCache(indexSettings);
         }
-        return new IndexService(indexSettings, environment, xContentRegistry,
+        return new IndexService(indexSettings, indexCreationContext, environment, xContentRegistry,
                 new SimilarityService(indexSettings, scriptService, similarities),
-                shardStoreDeleter, analysisRegistry, engineFactory.get(), circuitBreakerService, bigArrays, threadPool, scriptService,
-                client, queryCache, store, eventListener, searcherWrapperFactory, mapperRegistry,
+                shardStoreDeleter, analysisRegistry, engineFactory, circuitBreakerService, bigArrays, threadPool, scriptService,
+                client, queryCache, directoryFactory, eventListener, searcherWrapperFactory, mapperRegistry,
                 indicesFieldDataCache, searchOperationListeners, indexOperationListeners, namedWriteableRegistry);
+    }
+
+    private static IndexStorePlugin.DirectoryFactory getDirectoryFactory(
+            final IndexSettings indexSettings, final Map<String, IndexStorePlugin.DirectoryFactory> indexStoreFactories) {
+        final String storeType = indexSettings.getValue(INDEX_STORE_TYPE_SETTING);
+        final Type type;
+        final Boolean allowMmap = NODE_STORE_ALLOW_MMAP.get(indexSettings.getNodeSettings());
+        if (storeType.isEmpty() || Type.FS.getSettingsKey().equals(storeType)) {
+            type = defaultStoreType(allowMmap);
+        } else {
+            if (isBuiltinType(storeType)) {
+                type = Type.fromSettingsKey(storeType);
+            } else {
+                type = null;
+            }
+        }
+        if (allowMmap == false && (type == Type.MMAPFS || type == Type.HYBRIDFS)) {
+            throw new IllegalArgumentException("store type [" + storeType + "] is not allowed because mmap is disabled");
+        }
+        final IndexStorePlugin.DirectoryFactory factory;
+        if (storeType.isEmpty() || isBuiltinType(storeType)) {
+            factory = DEFAULT_DIRECTORY_FACTORY;
+        } else {
+            factory = indexStoreFactories.get(storeType);
+            if (factory == null) {
+                throw new IllegalArgumentException("Unknown store type [" + storeType + "]");
+            }
+        }
+        return factory;
     }
 
     /**

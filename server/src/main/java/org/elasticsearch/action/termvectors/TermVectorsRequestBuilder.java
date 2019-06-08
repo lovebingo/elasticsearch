@@ -33,7 +33,7 @@ import java.util.Map;
  * Note, the {@code index}, {@code type} and {@code id} are
  * required.
  */
-public class TermVectorsRequestBuilder extends ActionRequestBuilder<TermVectorsRequest, TermVectorsResponse, TermVectorsRequestBuilder> {
+public class TermVectorsRequestBuilder extends ActionRequestBuilder<TermVectorsRequest, TermVectorsResponse> {
 
     public TermVectorsRequestBuilder(ElasticsearchClient client, TermVectorsAction action) {
         super(client, action, new TermVectorsRequest());
@@ -44,8 +44,8 @@ public class TermVectorsRequestBuilder extends ActionRequestBuilder<TermVectorsR
      * from the provided index. Use {@code index}, {@code type} and
      * {@code id} to specify the document to load.
      */
-    public TermVectorsRequestBuilder(ElasticsearchClient client, TermVectorsAction action, String index, String type, String id) {
-        super(client, action, new TermVectorsRequest(index, type, id));
+    public TermVectorsRequestBuilder(ElasticsearchClient client, TermVectorsAction action, String index, String id) {
+        super(client, action, new TermVectorsRequest(index, id));
     }
 
     /**
@@ -53,14 +53,6 @@ public class TermVectorsRequestBuilder extends ActionRequestBuilder<TermVectorsR
      */
     public TermVectorsRequestBuilder setIndex(String index) {
         request.index(index);
-        return this;
-    }
-
-    /**
-     * Sets the type of the document.
-     */
-    public TermVectorsRequestBuilder setType(String type) {
-        request.type(type);
         return this;
     }
 

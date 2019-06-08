@@ -19,7 +19,6 @@
 
 package org.elasticsearch.tasks;
 
-import org.elasticsearch.Version;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -29,7 +28,6 @@ import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.ConstructingObjectParser;
 import org.elasticsearch.common.xcontent.ObjectParserHelper;
-import org.elasticsearch.common.xcontent.ToXContent.Params;
 import org.elasticsearch.common.xcontent.ToXContentFragment;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
@@ -100,11 +98,7 @@ public final class TaskInfo implements Writeable, ToXContentFragment {
         runningTimeNanos = in.readLong();
         cancellable = in.readBoolean();
         parentTaskId = TaskId.readFromStream(in);
-        if (in.getVersion().onOrAfter(Version.V_6_2_0)) {
-            headers = in.readMap(StreamInput::readString, StreamInput::readString);
-        } else {
-            headers = Collections.emptyMap();
-        }
+        headers = in.readMap(StreamInput::readString, StreamInput::readString);
     }
 
     @Override
@@ -118,9 +112,7 @@ public final class TaskInfo implements Writeable, ToXContentFragment {
         out.writeLong(runningTimeNanos);
         out.writeBoolean(cancellable);
         parentTaskId.writeTo(out);
-        if (out.getVersion().onOrAfter(Version.V_6_2_0)) {
-            out.writeMap(headers, StreamOutput::writeString, StreamOutput::writeString);
-        }
+        out.writeMap(headers, StreamOutput::writeString, StreamOutput::writeString);
     }
 
     public TaskId getTaskId() {
@@ -259,7 +251,7 @@ public final class TaskInfo implements Writeable, ToXContentFragment {
 
     @Override
     public String toString() {
-        return Strings.toString(this);
+        return Strings.toString(this, true, true);
     }
 
     // Implements equals and hashCode for testing

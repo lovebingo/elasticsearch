@@ -20,12 +20,12 @@
 package org.elasticsearch.action.explain;
 
 import org.elasticsearch.action.Action;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.common.io.stream.Writeable;
 
 /**
  * Entry point for the explain feature.
  */
-public class ExplainAction extends Action<ExplainRequest, ExplainResponse, ExplainRequestBuilder> {
+public class ExplainAction extends Action<ExplainResponse> {
 
     public static final ExplainAction INSTANCE = new ExplainAction();
     public static final String NAME = "indices:data/read/explain";
@@ -35,12 +35,12 @@ public class ExplainAction extends Action<ExplainRequest, ExplainResponse, Expla
     }
 
     @Override
-    public ExplainRequestBuilder newRequestBuilder(ElasticsearchClient client) {
-        return new ExplainRequestBuilder(client, this);
+    public ExplainResponse newResponse() {
+        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
     }
 
     @Override
-    public ExplainResponse newResponse() {
-        return new ExplainResponse();
+    public Writeable.Reader<ExplainResponse> getResponseReader() {
+        return ExplainResponse::new;
     }
 }

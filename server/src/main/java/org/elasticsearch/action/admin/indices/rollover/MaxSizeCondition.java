@@ -19,12 +19,12 @@
 
 package org.elasticsearch.action.admin.indices.rollover;
 
-import org.elasticsearch.Version;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentParser;
 
 import java.io.IOException;
 
@@ -51,11 +51,6 @@ public class MaxSizeCondition extends Condition<ByteSizeValue> {
     }
 
     @Override
-    boolean includedInVersion(Version version) {
-        return version.onOrAfter(Version.V_6_1_0);
-    }
-
-    @Override
     public String getWriteableName() {
         return NAME;
     }
@@ -69,5 +64,13 @@ public class MaxSizeCondition extends Condition<ByteSizeValue> {
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         return builder.field(NAME, value.getStringRep());
+    }
+
+    public static MaxSizeCondition fromXContent(XContentParser parser) throws IOException {
+        if (parser.nextToken() == XContentParser.Token.VALUE_STRING) {
+            return new MaxSizeCondition(ByteSizeValue.parseBytesSizeValue(parser.text(), NAME));
+        } else {
+            throw new IllegalArgumentException("invalid token: " + parser.currentToken());
+        }
     }
 }

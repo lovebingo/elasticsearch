@@ -22,9 +22,11 @@ package org.elasticsearch.index.query;
 import com.carrotsearch.randomizedtesting.generators.RandomNumbers;
 import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 
-import org.elasticsearch.test.AbstractQueryTestCase;
-
 import java.util.Random;
+
+import static org.elasticsearch.test.AbstractBuilderTestCase.STRING_ALIAS_FIELD_NAME;
+import static org.elasticsearch.test.AbstractBuilderTestCase.STRING_FIELD_NAME;
+import static org.elasticsearch.test.ESTestCase.randomFrom;
 
 /**
  * Utility class for creating random QueryBuilders.
@@ -45,7 +47,9 @@ public class RandomQueryBuilder {
             case 1:
                 return new TermQueryBuilderTests().createTestQueryBuilder();
             case 2:
-                return new IdsQueryBuilderTests().createTestQueryBuilder();
+                // We make sure this query has no types to avoid deprecation warnings in the
+                // tests that use this method.
+            return new IdsQueryBuilderTests().createTestQueryBuilder();
             case 3:
                 return createMultiTermQuery(r);
             default:
@@ -62,9 +66,10 @@ public class RandomQueryBuilder {
         // for now, only use String Rangequeries for MultiTerm test, numeric and date makes little sense
         // see issue #12123 for discussion
         MultiTermQueryBuilder multiTermQueryBuilder;
+        String fieldName = randomFrom(STRING_FIELD_NAME, STRING_ALIAS_FIELD_NAME);
         switch(RandomNumbers.randomIntBetween(r, 0, 3)) {
             case 0:
-                RangeQueryBuilder stringRangeQuery = new RangeQueryBuilder(AbstractQueryTestCase.STRING_FIELD_NAME);
+                RangeQueryBuilder stringRangeQuery = new RangeQueryBuilder(fieldName);
                 stringRangeQuery.from("a" + RandomStrings.randomAsciiOfLengthBetween(r, 1, 10));
                 stringRangeQuery.to("z" + RandomStrings.randomAsciiOfLengthBetween(r, 1, 10));
                 multiTermQueryBuilder = stringRangeQuery;
@@ -76,7 +81,7 @@ public class RandomQueryBuilder {
                 multiTermQueryBuilder = new WildcardQueryBuilderTests().createTestQueryBuilder();
                 break;
             case 3:
-                multiTermQueryBuilder = new FuzzyQueryBuilder(AbstractQueryTestCase.STRING_FIELD_NAME,
+                multiTermQueryBuilder = new FuzzyQueryBuilder(fieldName,
                         RandomStrings.randomAsciiOfLengthBetween(r, 1, 10));
                 break;
             default:

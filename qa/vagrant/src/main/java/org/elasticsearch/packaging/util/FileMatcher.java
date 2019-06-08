@@ -30,11 +30,10 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.Objects;
 import java.util.Set;
 
+import static java.nio.file.attribute.PosixFilePermissions.fromString;
 import static org.elasticsearch.packaging.util.FileUtils.getBasicFileAttributes;
 import static org.elasticsearch.packaging.util.FileUtils.getFileOwner;
 import static org.elasticsearch.packaging.util.FileUtils.getPosixFileAttributes;
-
-import static java.nio.file.attribute.PosixFilePermissions.fromString;
 
 /**
  * Asserts that a file at a path matches its status as Directory/File, and its owner. If on a posix system, also matches the permission
@@ -47,6 +46,7 @@ public class FileMatcher extends TypeSafeMatcher<Path> {
     public enum Fileness { File, Directory }
 
     public static final Set<PosixFilePermission> p755 = fromString("rwxr-xr-x");
+    public static final Set<PosixFilePermission> p750 = fromString("rwxr-x---");
     public static final Set<PosixFilePermission> p660 = fromString("rw-rw----");
     public static final Set<PosixFilePermission> p644 = fromString("rw-r--r--");
 

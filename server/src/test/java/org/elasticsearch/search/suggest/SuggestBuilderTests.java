@@ -40,7 +40,6 @@ import java.io.IOException;
 import java.util.Map.Entry;
 
 import static java.util.Collections.emptyList;
-import static org.elasticsearch.test.EqualsHashCodeTestUtils.checkEqualsAndHashCode;
 
 public class SuggestBuilderTests extends ESTestCase {
 
@@ -53,7 +52,7 @@ public class SuggestBuilderTests extends ESTestCase {
      */
     @BeforeClass
     public static void init() {
-        SearchModule searchModule = new SearchModule(Settings.EMPTY, false, emptyList());
+        SearchModule searchModule = new SearchModule(Settings.EMPTY, emptyList());
         namedWriteableRegistry = new NamedWriteableRegistry(searchModule.getNamedWriteables());
         xContentRegistry = new NamedXContentRegistry(searchModule.getNamedXContents());
     }
@@ -75,11 +74,12 @@ public class SuggestBuilderTests extends ESTestCase {
                 xContentBuilder.prettyPrint();
             }
             suggestBuilder.toXContent(xContentBuilder, ToXContent.EMPTY_PARAMS);
-            XContentParser parser = createParser(xContentBuilder);
-            SuggestBuilder secondSuggestBuilder = SuggestBuilder.fromXContent(parser);
-            assertNotSame(suggestBuilder, secondSuggestBuilder);
-            assertEquals(suggestBuilder, secondSuggestBuilder);
-            assertEquals(suggestBuilder.hashCode(), secondSuggestBuilder.hashCode());
+            try (XContentParser parser = createParser(xContentBuilder)) {
+                SuggestBuilder secondSuggestBuilder = SuggestBuilder.fromXContent(parser);
+                assertNotSame(suggestBuilder, secondSuggestBuilder);
+                assertEquals(suggestBuilder, secondSuggestBuilder);
+                assertEquals(suggestBuilder.hashCode(), secondSuggestBuilder.hashCode());
+            }
         }
     }
 

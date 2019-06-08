@@ -56,3 +56,23 @@
       indices.put_alias:
         index: test_index
         name: foo
+
+---
+"Can set is_write_index":
+
+  - do:
+      indices.create:
+        index: test_index
+
+  - do:
+      indices.put_alias:
+        index: test_index
+        name: test_alias
+        body:
+          is_write_index: true
+
+  - do:
+      indices.get_alias:
+        index: test_index
+        name: test_alias
+  - match: {test_index.aliases.test_alias: { 'is_write_index': true }}

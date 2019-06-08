@@ -5,58 +5,59 @@
  */
 package org.elasticsearch.smoketest;
 
-import org.apache.http.entity.ContentType;
-import org.apache.http.entity.StringEntity;
 import org.apache.lucene.util.LuceneTestCase.AwaitsFix;
+import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.bytes.BytesReference;
-import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.test.rest.ESRestTestCase;
 import org.elasticsearch.test.rest.yaml.ObjectPath;
-import org.elasticsearch.xpack.monitoring.exporter.ClusterAlertsUtil;
-import org.elasticsearch.xpack.watcher.actions.ActionBuilders;
-import org.elasticsearch.xpack.watcher.client.WatchSourceBuilders;
-import org.elasticsearch.xpack.watcher.trigger.TriggerBuilders;
-import org.elasticsearch.xpack.watcher.trigger.schedule.IntervalSchedule;
 import org.junit.After;
 
 import java.io.IOException;
-import java.util.Collections;
 
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
-import static org.elasticsearch.xpack.watcher.input.InputBuilders.simpleInput;
-import static org.elasticsearch.xpack.watcher.trigger.schedule.IntervalSchedule.Interval.Unit.MINUTES;
 import static org.hamcrest.Matchers.is;
 
 @TestLogging("org.elasticsearch.client:TRACE,tracer:TRACE")
 @AwaitsFix(bugUrl = "flaky tests")
 public class MonitoringWithWatcherRestIT extends ESRestTestCase {
 
+    /**
+     * An unsorted list of Watch IDs representing resource files for Monitoring Cluster Alerts.
+     */
+    public static final String[] WATCH_IDS = {
+        "elasticsearch_cluster_status",
+        "elasticsearch_version_mismatch",
+        "kibana_version_mismatch",
+        "logstash_version_mismatch",
+        "xpack_license_expiration",
+        "elasticsearch_nodes",
+    };
+
     @After
     public void cleanExporters() throws Exception {
-        String body = Strings.toString(jsonBuilder().startObject().startObject("transient")
-                .nullField("xpack.monitoring.exporters.*")
-                .endObject().endObject());
-        assertOK(adminClient().performRequest("PUT", "_cluster/settings", Collections.emptyMap(),
-                new StringEntity(body, ContentType.APPLICATION_JSON)));
-
-        assertOK(adminClient().performRequest("DELETE", ".watch*", Collections.emptyMap()));
+        Request request = new Request("PUT", "/_cluster/settings");
+        request.setJsonEntity(Strings.toString(jsonBuilder().startObject()
+                .startObject("transient")
+                    .nullField("xpack.monitoring.exporters.*")
+                .endObject().endObject()));
+        adminClient().performRequest(request);
+        adminClient().performRequest(new Request("DELETE", "/.watch*"));
     }
 
     public void testThatLocalExporterAddsWatches() throws Exception {
         String watchId = createMonitoringWatch();
 
-        String body = BytesReference.bytes(jsonBuilder().startObject().startObject("transient")
-                .field("xpack.monitoring.exporters.my_local_exporter.type", "local")
-                .field("xpack.monitoring.exporters.my_local_exporter.cluster_alerts.management.enabled", true)
-                .endObject().endObject()).utf8ToString();
+        Request request = new Request("PUT", "/_cluster/settings");
+        request.setJsonEntity(Strings.toString(jsonBuilder().startObject()
+                .startObject("transient")
+                    .field("xpack.monitoring.exporters.my_local_exporter.type", "local")
+                    .field("xpack.monitoring.exporters.my_local_exporter.cluster_alerts.management.enabled", true)
+                .endObject().endObject()));
+        adminClient().performRequest(request);
 
-        adminClient().performRequest("PUT", "_cluster/settings", Collections.emptyMap(),
-                new StringEntity(body, ContentType.APPLICATION_JSON));
-
-        assertTotalWatchCount(ClusterAlertsUtil.WATCH_IDS.length);
+        assertTotalWatchCount(WATCH_IDS.length);
 
         assertMonitoringWatchHasBeenOverWritten(watchId);
     }
@@ -65,30 +66,30 @@ public class MonitoringWithWatcherRestIT extends ESRestTestCase {
         String watchId = createMonitoringWatch();
         String httpHost = getHttpHost();
 
-        String body = BytesReference.bytes(jsonBuilder().startObject().startObject("transient")
-                .field("xpack.monitoring.exporters.my_http_exporter.type", "http")
-                .field("xpack.monitoring.exporters.my_http_exporter.host", httpHost)
-                .field("xpack.monitoring.exporters.my_http_exporter.cluster_alerts.management.enabled", true)
-                .endObject().endObject()).utf8ToString();
+        Request request = new Request("PUT", "/_cluster/settings");
+        request.setJsonEntity(Strings.toString(jsonBuilder().startObject()
+                .startObject("transient")
+                    .field("xpack.monitoring.exporters.my_http_exporter.type", "http")
+                    .field("xpack.monitoring.exporters.my_http_exporter.host", httpHost)
+                    .field("xpack.monitoring.exporters.my_http_exporter.cluster_alerts.management.enabled", true)
+                .endObject().endObject()));
+        adminClient().performRequest(request);
 
-        adminClient().performRequest("PUT", "_cluster/settings", Collections.emptyMap(),
-                new StringEntity(body, ContentType.APPLICATION_JSON));
-
-        assertTotalWatchCount(ClusterAlertsUtil.WATCH_IDS.length);
+        assertTotalWatchCount(WATCH_IDS.length);
 
         assertMonitoringWatchHasBeenOverWritten(watchId);
     }
 
     private void assertMonitoringWatchHasBeenOverWritten(String watchId) throws Exception {
-        ObjectPath path = ObjectPath.createFromResponse(client().performRequest("GET", "_xpack/watcher/watch/" + watchId));
+        ObjectPath path = ObjectPath.createFromResponse(client().performRequest(new Request("GET", "/_watcher/watch/" + watchId)));
         String interval = path.evaluate("watch.trigger.schedule.interval");
         assertThat(interval, is("1m"));
     }
 
     private void assertTotalWatchCount(int expectedWatches) throws Exception {
         assertBusy(() -> {
-            assertOK(client().performRequest("POST", ".watches/_refresh"));
-            ObjectPath path = ObjectPath.createFromResponse(client().performRequest("POST", ".watches/_count"));
+            assertOK(client().performRequest(new Request("POST", "/.watches/_refresh")));
+            ObjectPath path = ObjectPath.createFromResponse(client().performRequest(new Request("POST", "/.watches/_count")));
             int count = path.evaluate("count");
             assertThat(count, is(expectedWatches));
         });
@@ -97,28 +98,27 @@ public class MonitoringWithWatcherRestIT extends ESRestTestCase {
     private String createMonitoringWatch() throws Exception {
         String clusterUUID = getClusterUUID();
         String watchId = clusterUUID + "_kibana_version_mismatch";
-        String sampleWatch = WatchSourceBuilders.watchBuilder()
-                .trigger(TriggerBuilders.schedule(new IntervalSchedule(new IntervalSchedule.Interval(1000, MINUTES))))
-                .input(simpleInput())
-                .addAction("logme", ActionBuilders.loggingAction("foo"))
-                .buildAsBytes(XContentType.JSON).utf8ToString();
-        client().performRequest("PUT", "_xpack/watcher/watch/" + watchId, Collections.emptyMap(),
-                new StringEntity(sampleWatch, ContentType.APPLICATION_JSON));
+        Request request = new Request("PUT", "/_watcher/watch/" + watchId);
+        String watch = "{\"trigger\":{\"schedule\":{\"interval\":\"1000m\"}},\"input\":{\"simple\":{}}," +
+            "\"condition\":{\"always\":{}}," +
+            "\"actions\":{\"logme\":{\"logging\":{\"level\":\"info\",\"text\":\"foo\"}}}}";
+        request.setJsonEntity(watch);
+        client().performRequest(request);
         return watchId;
     }
 
     private String getClusterUUID() throws Exception {
-        Response response = client().performRequest("GET", "_cluster/state/metadata", Collections.emptyMap());
+        Response response = client().performRequest(new Request("GET", "/_cluster/state/metadata"));
         ObjectPath objectPath = ObjectPath.createFromResponse(response);
         String clusterUUID = objectPath.evaluate("metadata.cluster_uuid");
         return clusterUUID;
     }
 
     public String getHttpHost() throws IOException {
-        ObjectPath path = ObjectPath.createFromResponse(client().performRequest("GET", "_cluster/state", Collections.emptyMap()));
+        ObjectPath path = ObjectPath.createFromResponse(client().performRequest(new Request("GET", "/_cluster/state")));
         String masterNodeId = path.evaluate("master_node");
 
-        ObjectPath nodesPath = ObjectPath.createFromResponse(client().performRequest("GET", "_nodes", Collections.emptyMap()));
+        ObjectPath nodesPath = ObjectPath.createFromResponse(client().performRequest(new Request("GET", "/_nodes")));
         String httpHost = nodesPath.evaluate("nodes." + masterNodeId + ".http.publish_address");
         return httpHost;
     }

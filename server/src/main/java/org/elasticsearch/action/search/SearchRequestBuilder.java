@@ -26,11 +26,11 @@ import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.script.Script;
-import org.elasticsearch.search.collapse.CollapseBuilder;
 import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.aggregations.AggregationBuilder;
 import org.elasticsearch.search.aggregations.PipelineAggregationBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.collapse.CollapseBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
 import org.elasticsearch.search.rescore.RescorerBuilder;
 import org.elasticsearch.search.slice.SliceBuilder;
@@ -44,7 +44,7 @@ import java.util.List;
 /**
  * A search action request builder.
  */
-public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, SearchResponse, SearchRequestBuilder> {
+public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, SearchResponse> {
 
     public SearchRequestBuilder(ElasticsearchClient client, SearchAction action) {
         super(client, action, new SearchRequest());
@@ -55,17 +55,6 @@ public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, Se
      */
     public SearchRequestBuilder setIndices(String... indices) {
         request.indices(indices);
-        return this;
-    }
-
-    /**
-     * The document types to execute the search against. Defaults to be executed against
-     * all types.
-     * @deprecated Types are going away, prefer filtering on a field.
-     */
-    @Deprecated
-    public SearchRequestBuilder setTypes(String... types) {
-        request.types(types);
         return this;
     }
 
@@ -224,6 +213,15 @@ public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, Se
         sourceBuilder().version(version);
         return this;
     }
+    
+    /**
+     * Should each {@link org.elasticsearch.search.SearchHit} be returned with the
+     * sequence number and primary term of the last modification of the document.
+     */
+    public SearchRequestBuilder seqNoAndPrimaryTerm(boolean seqNoAndPrimaryTerm) {
+        sourceBuilder().seqNoAndPrimaryTerm(seqNoAndPrimaryTerm);
+        return this;
+    }
 
     /**
      * Sets the boost a specific index will receive when the query is executed against it.
@@ -341,7 +339,7 @@ public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, Se
      *
      * @see org.elasticsearch.search.sort.SortBuilders
      */
-    public SearchRequestBuilder addSort(SortBuilder sort) {
+    public SearchRequestBuilder addSort(SortBuilder<?> sort) {
         sourceBuilder().sort(sort);
         return this;
     }
@@ -369,7 +367,9 @@ public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, Se
     }
 
     /**
-     * Indicates if the total hit count for the query should be tracked. Defaults to {@code true}
+     * Indicates if the total hit count for the query should be tracked. Requests will count total hit count accurately
+     * up to 10,000 by default, see {@link #setTrackTotalHitsUpTo(int)} to change this value or set to true/false to always/never
+     * count accurately.
      */
     public SearchRequestBuilder setTrackTotalHits(boolean trackTotalHits) {
         sourceBuilder().trackTotalHits(trackTotalHits);
@@ -377,13 +377,10 @@ public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, Se
     }
 
     /**
-     * Adds stored fields to load and return (note, it must be stored) as part of the search request.
-     * To disable the stored fields entirely (source and metadata fields) use {@code storedField("_none_")}.
-     * @deprecated Use {@link SearchRequestBuilder#storedFields(String...)} instead.
+     * Indicates the total hit count that should be tracked accurately or null if the value is unset. Defaults to 10,000.
      */
-    @Deprecated
-    public SearchRequestBuilder fields(String... fields) {
-        sourceBuilder().storedFields(Arrays.asList(fields));
+    public SearchRequestBuilder setTrackTotalHitsUpTo(int trackTotalHitsUpTo) {
+        sourceBuilder().trackTotalHitsUpTo(trackTotalHitsUpTo);
         return this;
     }
 
@@ -500,7 +497,7 @@ public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, Se
         request.requestCache(requestCache);
         return this;
     }
-    
+
 
     /**
      * Sets if this request should allow partial results.  (If method is not called,
@@ -509,7 +506,7 @@ public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, Se
     public SearchRequestBuilder setAllowPartialSearchResults(boolean allowPartialSearchResults) {
         request.allowPartialSearchResults(allowPartialSearchResults);
         return this;
-    }    
+    }
 
     /**
      * Should the query be profiled. Defaults to <code>false</code>
@@ -549,9 +546,9 @@ public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, Se
     }
 
     /**
-     * Sets the number of shard requests that should be executed concurrently. This value should be used as a protection mechanism to
-     * reduce the number of shard requests fired per high level search request. Searches that hit the entire cluster can be throttled
-     * with this number to reduce the cluster load. The default grows with the number of nodes in the cluster but is at most {@code 256}.
+     * Sets the number of shard requests that should be executed concurrently on a single node. This value should be used as a
+     * protection mechanism to reduce the number of shard requests fired per high level search request. Searches that hit the entire
+     * cluster can be throttled with this number to reduce the cluster load. The default is {@code 5}.
      */
     public SearchRequestBuilder setMaxConcurrentShardRequests(int maxConcurrentShardRequests) {
         this.request.setMaxConcurrentShardRequests(maxConcurrentShardRequests);

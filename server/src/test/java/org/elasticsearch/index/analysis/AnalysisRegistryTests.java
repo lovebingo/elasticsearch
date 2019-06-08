@@ -21,6 +21,7 @@ package org.elasticsearch.index.analysis;
 
 import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.MockTokenFilter;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.en.EnglishAnalyzer;
@@ -32,6 +33,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.TestEnvironment;
 import org.elasticsearch.index.IndexSettings;
+import org.elasticsearch.index.mapper.MapperException;
 import org.elasticsearch.indices.analysis.AnalysisModule;
 import org.elasticsearch.indices.analysis.AnalysisModule.AnalysisProvider;
 import org.elasticsearch.indices.analysis.PreBuiltAnalyzers;
@@ -41,6 +43,7 @@ import org.elasticsearch.test.IndexSettingsModule;
 import org.elasticsearch.test.VersionUtils;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
 
 import static java.util.Collections.emptyMap;
@@ -48,6 +51,8 @@ import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.instanceOf;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 public class AnalysisRegistryTests extends ESTestCase {
     private AnalysisRegistry emptyRegistry;
@@ -58,7 +63,7 @@ public class AnalysisRegistryTests extends ESTestCase {
 
     private static AnalysisRegistry emptyAnalysisRegistry(Settings settings) {
         return new AnalysisRegistry(TestEnvironment.newEnvironment(settings), emptyMap(), emptyMap(), emptyMap(), emptyMap(), emptyMap(),
-                emptyMap(), emptyMap(), emptyMap());
+                emptyMap(), emptyMap(), emptyMap(), emptyMap());
     }
 
     private static IndexSettings indexSettingsOfCurrentVersion(Settings.Builder settings) {
@@ -100,8 +105,31 @@ public class AnalysisRegistryTests extends ESTestCase {
         assertThat(indexAnalyzers.getDefaultSearchQuoteAnalyzer().analyzer(), instanceOf(EnglishAnalyzer.class));
     }
 
+    public void testOverrideDefaultAnalyzerWithoutAnalysisModeAll() throws IOException {
+        Version version = VersionUtils.randomVersion(random());
+        Settings settings = Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED, version).build();
+        TokenFilterFactory tokenFilter = new AbstractTokenFilterFactory(IndexSettingsModule.newIndexSettings("index", settings),
+                "my_filter", Settings.EMPTY) {
+            @Override
+            public AnalysisMode getAnalysisMode() {
+                return randomFrom(AnalysisMode.SEARCH_TIME, AnalysisMode.INDEX_TIME);
+            }
+
+            @Override
+            public TokenStream create(TokenStream tokenStream) {
+                return null;
+            }
+        };
+        Analyzer analyzer = new CustomAnalyzer("tokenizerName", null, new CharFilterFactory[0], new TokenFilterFactory[] { tokenFilter });
+        MapperException ex = expectThrows(MapperException.class,
+                () -> emptyRegistry.build(IndexSettingsModule.newIndexSettings("index", settings),
+                        singletonMap("default", new PreBuiltAnalyzerProvider("default", AnalyzerScope.INDEX, analyzer)), emptyMap(),
+                        emptyMap(), emptyMap(), emptyMap()));
+        assertEquals("analyzer [default] contains filters [my_filter] that are not allowed to run in all mode.", ex.getMessage());
+    }
+
     public void testOverrideDefaultIndexAnalyzerIsUnsupported() {
-        Version version = VersionUtils.randomVersionBetween(random(), Version.V_5_0_0_alpha1, Version.CURRENT);
+        Version version = VersionUtils.randomIndexCompatibleVersion(random());
         Settings settings = Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED, version).build();
         AnalyzerProvider<?> defaultIndex = new PreBuiltAnalyzerProvider("default_index", AnalyzerScope.INDEX, new EnglishAnalyzer());
         IllegalArgumentException e = expectThrows(IllegalArgumentException.class,
@@ -223,5 +251,17 @@ public class AnalysisRegistryTests extends ESTestCase {
         IndexAnalyzers indexAnalyzers = emptyRegistry.build(indexSettingsOfCurrentVersion(Settings.builder()));
         indexAnalyzers.close();
         indexAnalyzers.close();
+    }
+
+    public void testEnsureCloseInvocationProperlyDelegated() throws IOException {
+        Settings settings = Settings.builder()
+            .put(Environment.PATH_HOME_SETTING.getKey(), createTempDir().toString())
+            .build();
+        PreBuiltAnalyzerProviderFactory mock = mock(PreBuiltAnalyzerProviderFactory.class);
+        AnalysisRegistry registry = new AnalysisRegistry(TestEnvironment.newEnvironment(settings), emptyMap(), emptyMap(),
+            emptyMap(), emptyMap(), emptyMap(), emptyMap(), emptyMap(), emptyMap(), Collections.singletonMap("key", mock));
+
+        registry.close();
+        verify(mock).close();
     }
 }

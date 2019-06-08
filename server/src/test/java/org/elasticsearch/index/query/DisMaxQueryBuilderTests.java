@@ -50,7 +50,7 @@ public class DisMaxQueryBuilderTests extends AbstractQueryTestCase<DisMaxQueryBu
             dismax.add(RandomQueryBuilder.createQuery(random()));
         }
         if (randomBoolean()) {
-            dismax.tieBreaker(2.0f / randomIntBetween(1, 20));
+            dismax.tieBreaker((float) randomDoubleBetween(0d, 1d, true));
         }
         return dismax;
     }
@@ -89,7 +89,6 @@ public class DisMaxQueryBuilderTests extends AbstractQueryTestCase<DisMaxQueryBu
     }
 
     public void testToQueryInnerPrefixQuery() throws Exception {
-        assumeTrue("test runs only when at least a type is registered", getCurrentTypes().length > 0);
         String queryAsString = "{\n" +
                 "    \"dis_max\":{\n" +
                 "        \"queries\":[\n" +
@@ -151,5 +150,20 @@ public class DisMaxQueryBuilderTests extends AbstractQueryTestCase<DisMaxQueryBu
         assertEquals(json, 1.2, parsed.boost(), 0.0001);
         assertEquals(json, 0.7, parsed.tieBreaker(), 0.0001);
         assertEquals(json, 2, parsed.innerQueries().size());
+    }
+
+    public void testRewriteMultipleTimes() throws IOException {
+        DisMaxQueryBuilder dismax = new DisMaxQueryBuilder();
+        dismax.add(new WrapperQueryBuilder(new WrapperQueryBuilder(new MatchAllQueryBuilder().toString()).toString()));
+        QueryBuilder rewritten = dismax.rewrite(createShardContext());
+        DisMaxQueryBuilder expected = new DisMaxQueryBuilder();
+        expected.add(new MatchAllQueryBuilder());
+        assertEquals(expected, rewritten);
+
+        expected = new DisMaxQueryBuilder();
+        expected.add(new MatchAllQueryBuilder());
+        QueryBuilder rewrittenAgain = rewritten.rewrite(createShardContext());
+        assertEquals(rewrittenAgain, expected);
+        assertEquals(Rewriteable.rewrite(dismax, createShardContext()), expected);
     }
 }

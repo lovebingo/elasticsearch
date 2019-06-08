@@ -19,15 +19,12 @@
 
 package org.elasticsearch.action.admin.indices.shrink;
 
-import org.elasticsearch.Version;
 import org.elasticsearch.action.Action;
-import org.elasticsearch.client.ElasticsearchClient;
 
-public class ResizeAction extends Action<ResizeRequest, ResizeResponse, ResizeRequestBuilder> {
+public class ResizeAction extends Action<ResizeResponse> {
 
     public static final ResizeAction INSTANCE = new ResizeAction();
     public static final String NAME = "indices:admin/resize";
-    public static final Version COMPATIBILITY_VERSION = Version.V_6_1_0; // TODO remove this once it's backported
 
     private ResizeAction() {
         super(NAME);
@@ -36,10 +33,5 @@ public class ResizeAction extends Action<ResizeRequest, ResizeResponse, ResizeRe
     @Override
     public ResizeResponse newResponse() {
         return new ResizeResponse();
-    }
-
-    @Override
-    public ResizeRequestBuilder newRequestBuilder(ElasticsearchClient client) {
-        return new ResizeRequestBuilder(client, this);
     }
 }

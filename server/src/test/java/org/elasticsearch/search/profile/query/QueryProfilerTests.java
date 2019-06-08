@@ -32,7 +32,9 @@ import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryCachingPolicy;
 import org.apache.lucene.search.RandomApproximationQuery;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.ScorerSupplier;
 import org.apache.lucene.search.Sort;
@@ -79,7 +81,7 @@ public class QueryProfilerTests extends ESTestCase {
         }
         reader = w.getReader();
         w.close();
-        Engine.Searcher engineSearcher = new Engine.Searcher("test", new IndexSearcher(reader));
+        Engine.Searcher engineSearcher = new Engine.Searcher("test", new IndexSearcher(reader), null);
         searcher = new ContextIndexSearcher(engineSearcher, IndexSearcher.getDefaultQueryCache(), MAYBE_CACHE_POLICY);
     }
 
@@ -157,7 +159,7 @@ public class QueryProfilerTests extends ESTestCase {
 
     public void testApproximations() throws IOException {
         QueryProfiler profiler = new QueryProfiler();
-        Engine.Searcher engineSearcher = new Engine.Searcher("test", new IndexSearcher(reader));
+        Engine.Searcher engineSearcher = new Engine.Searcher("test", new IndexSearcher(reader), reader::close);
         // disable query caching since we want to test approximations, which won't
         // be exposed on a cached entry
         ContextIndexSearcher searcher = new ContextIndexSearcher(engineSearcher, null, MAYBE_CACHE_POLICY);
@@ -218,7 +220,7 @@ public class QueryProfilerTests extends ESTestCase {
         }
 
         @Override
-        public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+        public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
             return new Weight(this) {
                 @Override
                 public void extractTerms(Set<Term> terms) {
@@ -267,7 +269,7 @@ public class QueryProfilerTests extends ESTestCase {
         w.close();
         IndexSearcher s = newSearcher(reader);
         s.setQueryCache(null);
-        Weight weight = s.createNormalizedWeight(new DummyQuery(), randomBoolean());
+        Weight weight = s.createWeight(s.rewrite(new DummyQuery()), randomFrom(ScoreMode.values()), 1f);
         // exception when getting the scorer
         expectThrows(UnsupportedOperationException.class, () ->  weight.scorer(s.getIndexReader().leaves().get(0)));
         // no exception, means scorerSupplier is delegated
@@ -275,4 +277,29 @@ public class QueryProfilerTests extends ESTestCase {
         reader.close();
         dir.close();
     }
+
+    private static final QueryCachingPolicy ALWAYS_CACHE_POLICY = new QueryCachingPolicy() {
+
+        @Override
+        public void onUse(Query query) {}
+
+        @Override
+        public boolean shouldCache(Query query) throws IOException {
+            return true;
+        }
+
+    };
+
+    private static final QueryCachingPolicy NEVER_CACHE_POLICY = new QueryCachingPolicy() {
+
+        @Override
+        public void onUse(Query query) {}
+
+        @Override
+        public boolean shouldCache(Query query) throws IOException {
+            return false;
+        }
+
+    };
+
 }

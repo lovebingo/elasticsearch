@@ -49,8 +49,14 @@ public class BlobContainerWrapper implements BlobContainer {
     }
 
     @Override
-    public void writeBlob(String blobName, InputStream inputStream, long blobSize) throws IOException {
-        delegate.writeBlob(blobName, inputStream, blobSize);
+    public void writeBlob(String blobName, InputStream inputStream, long blobSize, boolean failIfAlreadyExists) throws IOException {
+        delegate.writeBlob(blobName, inputStream, blobSize, failIfAlreadyExists);
+    }
+
+    @Override
+    public void writeBlobAtomic(final String blobName, final InputStream inputStream, final long blobSize,
+                                boolean failIfAlreadyExists) throws IOException {
+        delegate.writeBlobAtomic(blobName, inputStream, blobSize, failIfAlreadyExists);
     }
 
     @Override
@@ -59,17 +65,22 @@ public class BlobContainerWrapper implements BlobContainer {
     }
 
     @Override
+    public void deleteBlobIgnoringIfNotExists(final String blobName) throws IOException {
+        delegate.deleteBlobIgnoringIfNotExists(blobName);
+    }
+
+    @Override
     public Map<String, BlobMetaData> listBlobs() throws IOException {
         return delegate.listBlobs();
     }
 
     @Override
-    public Map<String, BlobMetaData> listBlobsByPrefix(String blobNamePrefix) throws IOException {
-        return delegate.listBlobsByPrefix(blobNamePrefix);
+    public Map<String, BlobContainer> children() throws IOException {
+        return delegate.children();
     }
 
     @Override
-    public void move(String sourceBlobName, String targetBlobName) throws IOException {
-        delegate.move(sourceBlobName, targetBlobName);
+    public Map<String, BlobMetaData> listBlobsByPrefix(String blobNamePrefix) throws IOException {
+        return delegate.listBlobsByPrefix(blobNamePrefix);
     }
 }

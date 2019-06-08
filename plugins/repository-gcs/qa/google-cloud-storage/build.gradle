@@ -26,20 +26,6 @@ import java.security.KeyPairGenerator
 apply plugin: 'elasticsearch.standalone-rest-test'
 apply plugin: 'elasticsearch.rest-test'
 
-dependencies {
-    testCompile project(path: ':plugins:repository-gcs', configuration: 'runtime')
-}
-
-integTestCluster {
-    plugin ':plugins:repository-gcs'
-}
-
-forbiddenApisTest {
-    // we are using jdk-internal instead of jdk-non-portable to allow for com.sun.net.httpserver.* usage
-    bundledSignatures -= 'jdk-non-portable'
-    bundledSignatures += 'jdk-internal'
-}
-
 boolean useFixture = false
 
 String gcsServiceAccount = System.getenv("google_storage_service_account")
@@ -61,7 +47,7 @@ if (!gcsServiceAccount && !gcsBucket && !gcsBasePath) {
 
 /** A task to start the GoogleCloudStorageFixture which emulates a Google Cloud Storage service **/
 task googleCloudStorageFixture(type: AntFixture) {
-    dependsOn compileTestJava
+    dependsOn testClasses
     env 'CLASSPATH', "${ -> project.sourceSets.test.runtimeClasspath.asPath }"
     executable = new File(project.runtimeJavaHome, 'bin/java')
     args 'org.elasticsearch.repositories.gcs.GoogleCloudStorageFixture', baseDir, 'bucket_test'
@@ -97,14 +83,20 @@ processTestResources {
     MavenFilteringHack.filter(it, expansions)
 }
 
-integTestCluster {
-    keystoreFile 'gcs.client.integration_test.credentials_file', "${serviceAccountFile.absolutePath}"
+integTest {
+    dependsOn project(':plugins:repository-gcs').bundlePlugin
+}
+
+testClusters.integTest {
+    plugin file(project(':plugins:repository-gcs').bundlePlugin.archiveFile)
+
+    keystore 'gcs.client.integration_test.credentials_file', serviceAccountFile
 
     if (useFixture) {
-        dependsOn createServiceAccountFile, googleCloudStorageFixture
+        tasks.integTest.dependsOn createServiceAccountFile, googleCloudStorageFixture
         /* Use a closure on the string to delay evaluation until tests are executed */
-        setting 'gcs.client.integration_test.endpoint', "http://${ -> googleCloudStorageFixture.addressAndPort }"
-        setting 'gcs.client.integration_test.token_uri', "http://${ -> googleCloudStorageFixture.addressAndPort }/o/oauth2/token"
+        setting 'gcs.client.integration_test.endpoint', { "http://${googleCloudStorageFixture.addressAndPort}" }
+        setting 'gcs.client.integration_test.token_uri', { "http://${googleCloudStorageFixture.addressAndPort}/o/oauth2/token" }
     } else {
         println "Using an external service to test the repository-gcs plugin"
     }

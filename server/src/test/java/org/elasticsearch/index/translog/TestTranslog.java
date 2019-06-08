@@ -34,8 +34,10 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -45,72 +47,79 @@ import java.util.regex.Pattern;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.empty;
-import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.core.Is.is;
+import static org.hamcrest.core.IsNot.not;
 
 /**
  * Helpers for testing translog.
  */
 public class TestTranslog {
-    static final Pattern TRANSLOG_FILE_PATTERN = Pattern.compile("translog-(\\d+)\\.tlog");
+    private static final Pattern TRANSLOG_FILE_PATTERN = Pattern.compile("translog-(\\d+)\\.tlog");
+
+    public static void corruptRandomTranslogFile(Logger logger, Random random, Collection<Path> translogDirs) throws IOException {
+        for (Path translogDir : translogDirs) {
+            final long minTranslogGen = minTranslogGenUsedInRecovery(translogDir);
+            corruptRandomTranslogFile(logger, random, translogDir, minTranslogGen);
+        }
+    }
 
     /**
-     * Corrupts some translog files (translog-N.tlog) from the given translog directories.
-     *
-     * @return a collection of tlog files that have been corrupted.
+     * Corrupts random translog file (translog-N.tlog) from the given translog directory.
      */
-    public static Set<Path> corruptTranslogFiles(Logger logger, Random random, Collection<Path> translogDirs) throws IOException {
+    public static void corruptRandomTranslogFile(Logger logger, Random random, Path translogDir, long minGeneration)
+            throws IOException {
         Set<Path> candidates = new TreeSet<>(); // TreeSet makes sure iteration order is deterministic
-        for (Path translogDir : translogDirs) {
-            if (Files.isDirectory(translogDir)) {
-                final long minUsedTranslogGen = minTranslogGenUsedInRecovery(translogDir);
-                logger.info("--> Translog dir [{}], minUsedTranslogGen [{}]", translogDir, minUsedTranslogGen);
-                try (DirectoryStream<Path> stream = Files.newDirectoryStream(translogDir)) {
-                    for (Path item : stream) {
-                        if (Files.isRegularFile(item)) {
-                            // Makes sure that we will corrupt tlog files that are referenced by the Checkpoint.
-                            final Matcher matcher = TRANSLOG_FILE_PATTERN.matcher(item.getFileName().toString());
-                            if (matcher.matches() && Long.parseLong(matcher.group(1)) >= minUsedTranslogGen) {
-                                candidates.add(item);
-                            }
-                        }
+        logger.info("--> corruptRandomTranslogFile: translogDir [{}], minUsedTranslogGen [{}]", translogDir, minGeneration);
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(translogDir)) {
+            for (Path item : stream) {
+                if (Files.isRegularFile(item)) {
+                    final Matcher matcher = TRANSLOG_FILE_PATTERN.matcher(item.getFileName().toString());
+                    if (matcher.matches() && Long.parseLong(matcher.group(1)) >= minGeneration) {
+                        candidates.add(item);
                     }
                 }
             }
         }
+        assertThat("no translog files found in " + translogDir, candidates, is(not(empty())));
 
-        Set<Path> corruptedFiles = new HashSet<>();
-        if (!candidates.isEmpty()) {
-            int corruptions = RandomNumbers.randomIntBetween(random, 5, 20);
-            for (int i = 0; i < corruptions; i++) {
-                Path fileToCorrupt = RandomPicks.randomFrom(random, candidates);
-                corruptFile(logger, random, fileToCorrupt);
-                corruptedFiles.add(fileToCorrupt);
-            }
-        }
-        assertThat("no translog file corrupted", corruptedFiles, not(empty()));
-        return corruptedFiles;
+        Path corruptedFile = RandomPicks.randomFrom(random, candidates);
+        corruptFile(logger, random, corruptedFile);
     }
 
     static void corruptFile(Logger logger, Random random, Path fileToCorrupt) throws IOException {
-        try (FileChannel raf = FileChannel.open(fileToCorrupt, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
-            // read
-            raf.position(RandomNumbers.randomLongBetween(random, 0, raf.size() - 1));
-            long filePointer = raf.position();
-            ByteBuffer bb = ByteBuffer.wrap(new byte[1]);
-            raf.read(bb);
-            bb.flip();
+        final long fileSize = Files.size(fileToCorrupt);
+        assertThat("cannot corrupt empty file " + fileToCorrupt, fileSize, greaterThan(0L));
 
-            // corrupt
-            byte oldValue = bb.get(0);
-            byte newValue = (byte) (oldValue + 1);
-            bb.put(0, newValue);
+        try (FileChannel fileChannel = FileChannel.open(fileToCorrupt, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+            final long corruptPosition = RandomNumbers.randomLongBetween(random, 0, fileSize - 1);
 
-            // rewrite
-            raf.position(filePointer);
-            raf.write(bb);
-            logger.info("--> corrupting file {} --  flipping at position {} from {} to {} file: {}",
-                fileToCorrupt, filePointer, Integer.toHexString(oldValue),
-                Integer.toHexString(newValue), fileToCorrupt);
+            if (random.nextBoolean()) {
+                // read
+                fileChannel.position(corruptPosition);
+                assertThat(fileChannel.position(), equalTo(corruptPosition));
+                ByteBuffer bb = ByteBuffer.wrap(new byte[1]);
+                fileChannel.read(bb);
+                bb.flip();
+
+                // corrupt
+                byte oldValue = bb.get(0);
+                byte newValue;
+                do {
+                    newValue = (byte) random.nextInt(0x100);
+                } while (newValue == oldValue);
+                bb.put(0, newValue);
+
+                // rewrite
+                fileChannel.position(corruptPosition);
+                fileChannel.write(bb);
+                logger.info("--> corrupting file {} at position {} turning 0x{} into 0x{}", fileToCorrupt, corruptPosition,
+                    Integer.toHexString(oldValue & 0xff), Integer.toHexString(newValue & 0xff));
+            } else {
+                logger.info("--> truncating file {} from length {} to length {}", fileToCorrupt, fileSize, corruptPosition);
+                fileChannel.truncate(corruptPosition);
+            }
         }
     }
 
@@ -132,5 +141,41 @@ public class TestTranslog {
      */
     public static long getCurrentTerm(Translog translog) {
         return translog.getCurrent().getPrimaryTerm();
+    }
+
+    public static List<Translog.Operation> drainSnapshot(Translog.Snapshot snapshot, boolean sortBySeqNo) throws IOException {
+        final List<Translog.Operation> ops = new ArrayList<>(snapshot.totalOperations());
+        Translog.Operation op;
+        while ((op = snapshot.next()) != null) {
+            ops.add(op);
+        }
+        if (sortBySeqNo) {
+            ops.sort(Comparator.comparing(Translog.Operation::seqNo));
+        }
+        return ops;
+    }
+
+    public static Translog.Snapshot newSnapshotFromOperations(List<Translog.Operation> operations) {
+        final Iterator<Translog.Operation> iterator = operations.iterator();
+        return new Translog.Snapshot() {
+            @Override
+            public int totalOperations() {
+                return operations.size();
+            }
+
+            @Override
+            public Translog.Operation next() {
+                if (iterator.hasNext()) {
+                    return iterator.next();
+                } else {
+                    return null;
+                }
+            }
+
+            @Override
+            public void close() {
+
+            }
+        };
     }
 }

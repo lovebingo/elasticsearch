@@ -5,6 +5,7 @@
  */
 package org.elasticsearch.xpack.monitoring.collector.cluster;
 
+import org.elasticsearch.Build;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.cluster.node.info.NodeInfo;
 import org.elasticsearch.action.admin.cluster.node.info.PluginsAndModules;
@@ -20,6 +21,7 @@ import org.elasticsearch.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
+import org.elasticsearch.cluster.routing.RecoverySource;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.UnassignedInfo;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -32,6 +34,7 @@ import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.discovery.DiscoveryModule;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.license.License;
 import org.elasticsearch.monitor.fs.FsInfo;
@@ -60,7 +63,6 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.singleton;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
-import static org.elasticsearch.cluster.routing.RecoverySource.StoreRecoverySource.EXISTING_STORE_INSTANCE;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
@@ -200,10 +202,15 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                                                                 transportAddress,
                                                                 singletonMap("attr", "value"),
                                                                 singleton(DiscoveryNode.Role.MASTER),
-                                                                Version.V_6_0_0_beta1);
+                                                                Version.CURRENT);
 
         final ClusterState clusterState = ClusterState.builder(clusterName)
-                                                        .metaData(MetaData.builder().clusterUUID(clusterUuid).build())
+                                                        .metaData(MetaData.builder()
+                                                            .clusterUUID(clusterUuid)
+                                                            .transientSettings(Settings.builder()
+                                                                .put("cluster.metadata.display_name", "my_prod_cluster")
+                                                                .build())
+                                                            .build())
                                                         .stateUUID("_state_uuid")
                                                         .version(12L)
                                                         .nodes(DiscoveryNodes.builder()
@@ -226,7 +233,8 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
         final List<XPackFeatureSet.Usage> usages = singletonList(new MonitoringFeatureSetUsage(false, true, false, null));
 
         final NodeInfo mockNodeInfo = mock(NodeInfo.class);
-        when(mockNodeInfo.getVersion()).thenReturn(Version.V_6_0_0_alpha2);
+        Version mockNodeVersion = Version.CURRENT.minimumIndexCompatibilityVersion();
+        when(mockNodeInfo.getVersion()).thenReturn(mockNodeVersion);
         when(mockNodeInfo.getNode()).thenReturn(discoveryNode);
 
         final TransportInfo mockTransportInfo = mock(TransportInfo.class);
@@ -237,6 +245,7 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
         when(mockNodeInfo.getSettings()).thenReturn(Settings.builder()
                                                             .put(NetworkModule.TRANSPORT_TYPE_KEY, "_transport")
                                                             .put(NetworkModule.HTTP_TYPE_KEY, "_http")
+                                                            .put(DiscoveryModule.DISCOVERY_TYPE_SETTING.getKey(), "_disco")
                                                             .build());
 
         final PluginsAndModules mockPluginsAndModules = mock(PluginsAndModules.class);
@@ -250,6 +259,7 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
         when(mockOsInfo.getAvailableProcessors()).thenReturn(32);
         when(mockOsInfo.getAllocatedProcessors()).thenReturn(16);
         when(mockOsInfo.getName()).thenReturn("_os_name");
+        when(mockOsInfo.getPrettyName()).thenReturn("_pretty_os_name");
 
         final JvmInfo mockJvmInfo = mock(JvmInfo.class);
         when(mockNodeInfo.getJvm()).thenReturn(mockJvmInfo);
@@ -257,6 +267,13 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
         when(mockJvmInfo.getVmName()).thenReturn("_jvm_vm_name");
         when(mockJvmInfo.getVmVersion()).thenReturn("_jvm_vm_version");
         when(mockJvmInfo.getVmVendor()).thenReturn("_jvm_vm_vendor");
+        when(mockJvmInfo.getBundledJdk()).thenReturn(true);
+        when(mockJvmInfo.getUsingBundledJdk()).thenReturn(true);
+
+        final Build mockBuild = mock(Build.class);
+        when(mockBuild.flavor()).thenReturn(Build.Flavor.DEFAULT);
+        when(mockBuild.type()).thenReturn(Build.Type.DOCKER);
+        when(mockNodeInfo.getBuild()).thenReturn(mockBuild);
 
         final NodeStats mockNodeStats = mock(NodeStats.class);
         when(mockNodeStats.getTimestamp()).thenReturn(0L);
@@ -289,7 +306,8 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
 
         final ShardId shardId = new ShardId("_index", "_index_id", 7);
         final UnassignedInfo unassignedInfo = new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED, "_message");
-        final ShardRouting shardRouting = ShardRouting.newUnassigned(shardId, true, EXISTING_STORE_INSTANCE, unassignedInfo);
+        final ShardRouting shardRouting = ShardRouting.newUnassigned(shardId, true,
+            RecoverySource.ExistingStoreRecoverySource.INSTANCE, unassignedInfo);
 
         final ShardStats mockShardStats = mock(ShardStats.class);
         when(mockShardStats.getShardRouting()).thenReturn(shardRouting);
@@ -302,6 +320,7 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
         when(mockNodeResponse.shardsStats()).thenReturn(new ShardStats[]{mockShardStats});
 
         final ClusterStatsResponse clusterStats = new ClusterStatsResponse(1451606400000L,
+                                                                            "_cluster",
                                                                             clusterName,
                                                                             singletonList(mockNodeResponse),
                                                                             emptyList());
@@ -353,6 +372,7 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                     + (needToEnableTLS ? ",\"cluster_needs_tls\":true" : "")
                   + "},"
                   + "\"cluster_stats\":{"
+                    + "\"cluster_uuid\":\"_cluster\","
                     + "\"timestamp\":1451606400000,"
                     + "\"status\":\"red\","
                     + "\"indices\":{"
@@ -427,7 +447,7 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                         + "\"ingest\":0"
                       + "},"
                       + "\"versions\":["
-                        + "\"6.0.0-alpha2\""
+                        + "\"" + mockNodeVersion + "\""
                       + "],"
                       + "\"os\":{"
                         + "\"available_processors\":32,"
@@ -435,6 +455,12 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                         + "\"names\":["
                           + "{"
                             + "\"name\":\"_os_name\","
+                            + "\"count\":1"
+                          + "}"
+                        + "],"
+                        + "\"pretty_names\":["
+                          + "{"
+                            + "\"pretty_name\":\"_pretty_os_name\","
                             + "\"count\":1"
                           + "}"
                         + "],"
@@ -464,6 +490,8 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                             + "\"vm_name\":\"_jvm_vm_name\","
                             + "\"vm_version\":\"_jvm_vm_version\","
                             + "\"vm_vendor\":\"_jvm_vm_vendor\","
+                            + "\"bundled_jdk\":true,"
+                            + "\"using_bundled_jdk\":true,"
                             + "\"count\":1"
                           + "}"
                         + "],"
@@ -497,7 +525,17 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                         + "\"http_types\":{"
                           + "\"_http\":1"
                         + "}"
-                      + "}"
+                      + "},"
+                      + "\"discovery_types\":{"
+                        + "\"_disco\":1"
+                      + "},"
+                      + "\"packaging_types\":["
+                        + "{"
+                          + "\"flavor\":\"default\","
+                          + "\"type\":\"docker\","
+                          + "\"count\":1"
+                        + "}"
+                      + "]"
                     + "}"
                   + "},"
                   + "\"cluster_state\":{"
@@ -515,6 +553,13 @@ public class ClusterStatsMonitoringDocTests extends BaseMonitoringDocTestCase<Cl
                         + "\"attributes\":{"
                           + "\"attr\":\"value\""
                         + "}"
+                      + "}"
+                    + "}"
+                  + "},"
+                  + "\"cluster_settings\":{"
+                    + "\"cluster\":{"
+                      + "\"metadata\":{"
+                        + "\"display_name\":\"my_prod_cluster\""
                       + "}"
                     + "}"
                   + "},"

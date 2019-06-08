@@ -49,7 +49,7 @@ public class SortBuilderTests extends ESTestCase {
 
     @BeforeClass
     public static void init() {
-        SearchModule searchModule = new SearchModule(Settings.EMPTY, false, emptyList());
+        SearchModule searchModule = new SearchModule(Settings.EMPTY, emptyList());
         xContentRegistry = new NamedXContentRegistry(searchModule.getNamedXContents());
     }
 
@@ -252,12 +252,13 @@ public class SortBuilderTests extends ESTestCase {
     }
 
     private List<SortBuilder<?>> parseSort(String jsonString) throws IOException {
-        XContentParser itemParser = createParser(JsonXContent.jsonXContent, jsonString);
+        try (XContentParser itemParser = createParser(JsonXContent.jsonXContent, jsonString)) {
 
-        assertEquals(XContentParser.Token.START_OBJECT, itemParser.nextToken());
-        assertEquals(XContentParser.Token.FIELD_NAME, itemParser.nextToken());
-        assertEquals("sort", itemParser.currentName());
-        itemParser.nextToken();
-        return SortBuilder.fromXContent(itemParser);
+            assertEquals(XContentParser.Token.START_OBJECT, itemParser.nextToken());
+            assertEquals(XContentParser.Token.FIELD_NAME, itemParser.nextToken());
+            assertEquals("sort", itemParser.currentName());
+            itemParser.nextToken();
+            return SortBuilder.fromXContent(itemParser);
+        }
     }
 }

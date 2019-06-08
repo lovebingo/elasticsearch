@@ -19,21 +19,18 @@
 
 package org.elasticsearch.test;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Random;
-import java.util.SortedSet;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.collect.Tuple;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** Utilities for selecting versions in tests */
 public class VersionUtils {
@@ -55,7 +52,7 @@ public class VersionUtils {
         // this breaks b/c 5.x is still in version list but master doesn't care about it!
         //assert majorVersions.size() == 2;
         // TODO: remove oldVersions, we should only ever have 2 majors in Version
-        List<Version> oldVersions = majorVersions.getOrDefault((int)current.major - 2, Collections.emptyList());
+        List<List<Version>> oldVersions = splitByMinor(majorVersions.getOrDefault((int)current.major - 2, Collections.emptyList()));
         List<List<Version>> previousMajor = splitByMinor(majorVersions.get((int)current.major - 1));
         List<List<Version>> currentMajor = splitByMinor(majorVersions.get((int)current.major));
 
@@ -81,12 +78,21 @@ public class VersionUtils {
                 moveLastToUnreleased(stableVersions, unreleasedVersions);
             }
             // remove the next bugfix
-            moveLastToUnreleased(stableVersions, unreleasedVersions);
+            if (stableVersions.isEmpty() == false) {
+                moveLastToUnreleased(stableVersions, unreleasedVersions);
+            }
         }
 
-        List<Version> releasedVersions = Stream.concat(oldVersions.stream(),
-            Stream.concat(previousMajor.stream(), currentMajor.stream()).flatMap(List::stream))
-            .collect(Collectors.toList());
+        // If none of the previous major was released, then the last minor and bugfix of the old version was not released either.
+        if (previousMajor.isEmpty()) {
+            assert currentMajor.isEmpty() : currentMajor;
+            // minor of the old version is being staged
+            moveLastToUnreleased(oldVersions, unreleasedVersions);
+            // bugix of the old version is also being staged
+            moveLastToUnreleased(oldVersions, unreleasedVersions);
+        }
+        List<Version> releasedVersions = Stream.of(oldVersions, previousMajor, currentMajor)
+            .flatMap(List::stream).flatMap(List::stream).collect(Collectors.toList());
         Collections.sort(unreleasedVersions); // we add unreleased out of order, so need to sort here
         return new Tuple<>(Collections.unmodifiableList(releasedVersions), Collections.unmodifiableList(unreleasedVersions));
     }
@@ -228,11 +234,35 @@ public class VersionUtils {
         return opt.get();
     }
 
+    /** returns the first future compatible version */
+    public static Version compatibleFutureVersion(Version version) {
+        final Optional<Version> opt = ALL_VERSIONS.stream().filter(version::before).filter(v -> v.isCompatible(version)).findAny();
+        assert opt.isPresent() : "no future compatible version for " + version;
+        return opt.get();
+    }
+
     /** Returns the maximum {@link Version} that is compatible with the given version. */
     public static Version maxCompatibleVersion(Version version) {
         final List<Version> compatible = ALL_VERSIONS.stream().filter(version::isCompatible).filter(version::onOrBefore)
             .collect(Collectors.toList());
         assert compatible.size() > 0;
         return compatible.get(compatible.size() - 1);
+    }
+
+    /**
+     * Returns a random version index compatible with the current version.
+     */
+    public static Version randomIndexCompatibleVersion(Random random) {
+        return randomVersionBetween(random, Version.CURRENT.minimumIndexCompatibilityVersion(), Version.CURRENT);
+    }
+
+    /**
+     * Returns a random version index compatible with the given version, but not the given version.
+     */
+    public static Version randomPreviousCompatibleVersion(Random random, Version version) {
+        // TODO: change this to minimumCompatibilityVersion(), but first need to remove released/unreleased
+        // versions so getPreviousVerison returns the *actual* previous version. Otherwise eg 8.0.0 returns say 7.0.2 for previous,
+        // but 7.2.0 for minimum compat
+        return randomVersionBetween(random, version.minimumIndexCompatibilityVersion(), getPreviousVersion(version));
     }
 }

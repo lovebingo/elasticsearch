@@ -77,7 +77,7 @@ public abstract class BasePipelineAggregationTestCase<AF extends AbstractPipelin
             .put(Environment.PATH_HOME_SETTING.getKey(), createTempDir())
             .build();
         IndicesModule indicesModule = new IndicesModule(Collections.emptyList());
-        SearchModule searchModule = new SearchModule(settings, false, emptyList());
+        SearchModule searchModule = new SearchModule(settings, emptyList());
         List<NamedWriteableRegistry.Entry> entries = new ArrayList<>();
         entries.addAll(indicesModule.getNamedWriteables());
         entries.addAll(searchModule.getNamedWriteables());
@@ -106,13 +106,14 @@ public abstract class BasePipelineAggregationTestCase<AF extends AbstractPipelin
         }
         factoriesBuilder.toXContent(builder, ToXContent.EMPTY_PARAMS);
         XContentBuilder shuffled = shuffleXContent(builder);
-        XContentParser parser = createParser(shuffled);
-        String contentString = factoriesBuilder.toString();
-        logger.info("Content string: {}", contentString);
-        PipelineAggregationBuilder newAgg = parse(parser);
-        assertNotSame(newAgg, testAgg);
-        assertEquals(testAgg, newAgg);
-        assertEquals(testAgg.hashCode(), newAgg.hashCode());
+        try (XContentParser parser = createParser(shuffled)) {
+            String contentString = factoriesBuilder.toString();
+            logger.info("Content string: {}", contentString);
+            PipelineAggregationBuilder newAgg = parse(parser);
+            assertNotSame(newAgg, testAgg);
+            assertEquals(testAgg, newAgg);
+            assertEquals(testAgg.hashCode(), newAgg.hashCode());
+        }
     }
 
     protected PipelineAggregationBuilder parse(XContentParser parser) throws IOException {
@@ -120,7 +121,7 @@ public abstract class BasePipelineAggregationTestCase<AF extends AbstractPipelin
         AggregatorFactories.Builder parsed = AggregatorFactories.parseAggregators(parser);
         assertThat(parsed.getAggregatorFactories(), hasSize(0));
         assertThat(parsed.getPipelineAggregatorFactories(), hasSize(1));
-        PipelineAggregationBuilder newAgg = parsed.getPipelineAggregatorFactories().get(0);
+        PipelineAggregationBuilder newAgg = parsed.getPipelineAggregatorFactories().iterator().next();
         assertNull(parser.nextToken());
         assertNotNull(newAgg);
         return newAgg;

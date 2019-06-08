@@ -11,8 +11,6 @@ import org.elasticsearch.xpack.core.ml.calendars.ScheduledEvent;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -32,25 +30,25 @@ public class ScheduledEventsWriterTests extends ESTestCase {
     public void testWrite() throws IOException {
         List<ScheduledEvent> events = new ArrayList<>();
         events.add(new ScheduledEvent.Builder().description("Black Friday")
-                .startTime(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1511395200000L), ZoneOffset.UTC))
-                .endTime(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1515369600000L), ZoneOffset.UTC))
+                .startTime(Instant.ofEpochMilli(1511395200000L))
+                .endTime(Instant.ofEpochMilli(1515369600000L))
                 .calendarId("calendar_id").build());
         events.add(new ScheduledEvent.Builder().description("Blue Monday")
-                .startTime(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1519603200000L), ZoneOffset.UTC))
-                .endTime(ZonedDateTime.ofInstant(Instant.ofEpochMilli(1519862400000L), ZoneOffset.UTC))
+                .startTime(Instant.ofEpochMilli(1519603200000L))
+                .endTime(Instant.ofEpochMilli(1519862400000L))
                 .calendarId("calendar_id").build());
 
         StringBuilder buffer = new StringBuilder();
         new ScheduledEventsWriter(events, TimeValue.timeValueHours(1), buffer).write();
 
         String expectedString = "scheduledevent.0.description = Black Friday\n" +
-                "scheduledevent.0.rules = [{\"actions\":[\"filter_results\",\"skip_sampling\"],\"conditions_connective\":\"and\"," +
-                "\"conditions\":[{\"type\":\"time\",\"condition\":{\"operator\":\"gte\",\"value\":\"1511395200\"}}," +
-                "{\"type\":\"time\",\"condition\":{\"operator\":\"lt\",\"value\":\"1515369600\"}}]}]\n" +
+                "scheduledevent.0.rules = [{\"actions\":[\"skip_result\",\"skip_model_update\"]," +
+                "\"conditions\":[{\"applies_to\":\"time\",\"operator\":\"gte\",\"value\":1.5113952E9}," +
+                "{\"applies_to\":\"time\",\"operator\":\"lt\",\"value\":1.5153696E9}]}]\n" +
                 "scheduledevent.1.description = Blue Monday\n" +
-                "scheduledevent.1.rules = [{\"actions\":[\"filter_results\",\"skip_sampling\"],\"conditions_connective\":\"and\"," +
-                "\"conditions\":[{\"type\":\"time\",\"condition\":{\"operator\":\"gte\",\"value\":\"1519603200\"}}," +
-                "{\"type\":\"time\",\"condition\":{\"operator\":\"lt\",\"value\":\"1519862400\"}}]}]" +
+                "scheduledevent.1.rules = [{\"actions\":[\"skip_result\",\"skip_model_update\"]," +
+                "\"conditions\":[{\"applies_to\":\"time\",\"operator\":\"gte\",\"value\":1.5196032E9}," +
+                "{\"applies_to\":\"time\",\"operator\":\"lt\",\"value\":1.5198624E9}]}]" +
                 "\n";
         assertThat(buffer.toString(), equalTo(expectedString));
     }

@@ -20,9 +20,9 @@
 package org.elasticsearch.action.admin.indices.mapping.get;
 
 import org.elasticsearch.action.Action;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.common.io.stream.Writeable;
 
-public class GetFieldMappingsAction extends Action<GetFieldMappingsRequest, GetFieldMappingsResponse, GetFieldMappingsRequestBuilder> {
+public class GetFieldMappingsAction extends Action<GetFieldMappingsResponse> {
 
     public static final GetFieldMappingsAction INSTANCE = new GetFieldMappingsAction();
     public static final String NAME = "indices:admin/mappings/fields/get";
@@ -32,12 +32,12 @@ public class GetFieldMappingsAction extends Action<GetFieldMappingsRequest, GetF
     }
 
     @Override
-    public GetFieldMappingsRequestBuilder newRequestBuilder(ElasticsearchClient client) {
-        return new GetFieldMappingsRequestBuilder(client, this);
+    public GetFieldMappingsResponse newResponse() {
+        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
     }
 
     @Override
-    public GetFieldMappingsResponse newResponse() {
-        return new GetFieldMappingsResponse();
+    public Writeable.Reader<GetFieldMappingsResponse> getResponseReader() {
+        return GetFieldMappingsResponse::new;
     }
 }

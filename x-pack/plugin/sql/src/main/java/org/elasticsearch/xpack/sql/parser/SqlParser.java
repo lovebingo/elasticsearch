@@ -22,8 +22,8 @@ import org.antlr.v4.runtime.atn.PredictionMode;
 import org.antlr.v4.runtime.dfa.DFA;
 import org.antlr.v4.runtime.misc.Pair;
 import org.antlr.v4.runtime.tree.TerminalNode;
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.xpack.sql.expression.Expression;
 import org.elasticsearch.xpack.sql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.sql.proto.SqlTypedParamValue;
@@ -33,12 +33,16 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
+import static java.lang.String.format;
+
 public class SqlParser {
-    private static final Logger log = Loggers.getLogger(SqlParser.class);
+
+    private static final Logger log = LogManager.getLogger();
 
     private final boolean DEBUG = false;
 
@@ -80,36 +84,57 @@ public class SqlParser {
         return invokeParser(expression, params, SqlBaseParser::singleExpression, AstBuilder::expression);
     }
 
-    private <T> T invokeParser(String sql, List<SqlTypedParamValue> params, Function<SqlBaseParser, ParserRuleContext> parseFunction,
+    private <T> T invokeParser(String sql,
+                               List<SqlTypedParamValue> params, Function<SqlBaseParser,
+                               ParserRuleContext> parseFunction,
                                BiFunction<AstBuilder, ParserRuleContext, T> visitor) {
-        SqlBaseLexer lexer = new SqlBaseLexer(new CaseInsensitiveStream(sql));
+        try {
+            SqlBaseLexer lexer = new SqlBaseLexer(new CaseInsensitiveStream(sql));
 
-        lexer.removeErrorListeners();
-        lexer.addErrorListener(ERROR_LISTENER);
+            lexer.removeErrorListeners();
+            lexer.addErrorListener(ERROR_LISTENER);
 
-        Map<Token, SqlTypedParamValue> paramTokens = new HashMap<>();
-        TokenSource tokenSource = new ParametrizedTokenSource(lexer, paramTokens, params);
+            Map<Token, SqlTypedParamValue> paramTokens = new HashMap<>();
+            TokenSource tokenSource = new ParametrizedTokenSource(lexer, paramTokens, params);
 
-        CommonTokenStream tokenStream = new CommonTokenStream(tokenSource);
-        SqlBaseParser parser = new SqlBaseParser(tokenStream);
+            CommonTokenStream tokenStream = new CommonTokenStream(tokenSource);
+            SqlBaseParser parser = new SqlBaseParser(tokenStream);
 
-        parser.addParseListener(new PostProcessor(Arrays.asList(parser.getRuleNames())));
+            parser.addParseListener(new PostProcessor(Arrays.asList(parser.getRuleNames())));
 
-        parser.removeErrorListeners();
-        parser.addErrorListener(ERROR_LISTENER);
+            parser.removeErrorListeners();
+            parser.addErrorListener(ERROR_LISTENER);
 
-        parser.getInterpreter().setPredictionMode(PredictionMode.SLL);
+            parser.getInterpreter().setPredictionMode(PredictionMode.SLL);
 
-        if (DEBUG) {
-            debug(parser);
+            if (DEBUG) {
+                debug(parser);
+                tokenStream.fill();
+
+                for (Token t : tokenStream.getTokens()) {
+                    String symbolicName = SqlBaseLexer.VOCABULARY.getSymbolicName(t.getType());
+                    String literalName = SqlBaseLexer.VOCABULARY.getLiteralName(t.getType());
+                    log.info(format(Locale.ROOT, "  %-15s '%s'",
+                        symbolicName == null ? literalName : symbolicName,
+                        t.getText()));
+                }
+            }
+
+            ParserRuleContext tree = parseFunction.apply(parser);
+
+            if (DEBUG) {
+                log.info("Parse tree {} " + tree.toStringTree());
+            }
+
+            return visitor.apply(new AstBuilder(paramTokens), tree);
+        } catch (StackOverflowError e) {
+            throw new ParsingException("SQL statement is too large, " +
+                "causing stack overflow when generating the parsing tree: [{}]", sql);
         }
-
-        ParserRuleContext tree = parseFunction.apply(parser);
-
-        return visitor.apply(new AstBuilder(paramTokens), tree);
     }
 
-    private void debug(SqlBaseParser parser) {
+    private static void debug(SqlBaseParser parser) {
+
         // when debugging, use the exact prediction mode (needed for diagnostics as well)
         parser.getInterpreter().setPredictionMode(PredictionMode.LL_EXACT_AMBIG_DETECTION);
 
@@ -137,7 +162,7 @@ public class SqlParser {
         public void exitBackQuotedIdentifier(SqlBaseParser.BackQuotedIdentifierContext context) {
             Token token = context.BACKQUOTED_IDENTIFIER().getSymbol();
             throw new ParsingException(
-                    "backquoted indetifiers not supported; please use double quotes instead",
+                    "backquoted identifiers not supported; please use double quotes instead",
                     null,
                     token.getLine(),
                     token.getCharPositionInLine());

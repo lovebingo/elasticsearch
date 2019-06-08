@@ -3,7 +3,6 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
         refresh: true
@@ -39,6 +38,7 @@
 
   - do:
       search:
+        rest_total_hits_as_int: true
         index: dest
         body:
           query:
@@ -58,13 +58,11 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
   - do:
       index:
         index:   source
-        type:    foo
         id:      2
         body:    { "text": "test2" }
   - do:
@@ -96,6 +94,7 @@
 
   - do:
       search:
+        rest_total_hits_as_int: true
         index: dest
         body:
           query:
@@ -114,7 +113,6 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
         routing: foo
@@ -143,6 +141,7 @@
 
   - do:
       search:
+        rest_total_hits_as_int: true
         index: dest
         routing: foo
         body:
@@ -166,7 +165,6 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
         refresh: true
@@ -204,6 +202,7 @@
 
   - do:
       search:
+        rest_total_hits_as_int: true
         index: dest
         body:
           query:
@@ -220,17 +219,19 @@
 
 ---
 "Reindex from remote with size":
+  - skip:
+      version: "7.2.0 - "
+      reason: "7.2 should use max_docs or get deprecation warning"
+
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
         refresh: true
   - do:
       index:
         index:   source
-        type:    foo
         id:      2
         body:    { "text": "test" }
         refresh: true
@@ -267,6 +268,73 @@
 
   - do:
       search:
+        rest_total_hits_as_int: true
+        index: dest
+        body:
+          query:
+            match:
+              text: test
+  - match: {hits.total: 1}
+
+  # Make sure reindex closed all the scroll contexts
+  - do:
+      indices.stats:
+        index: source
+        metric: search
+  - match: {indices.source.total.search.open_contexts: 0}
+
+---
+"Reindex from remote with max_docs":
+  - skip:
+      version: " - 7.1.99"
+      reason: "max_docs introduced in 7.2.0"
+
+  - do:
+      index:
+        index:   source
+        id:      1
+        body:    { "text": "test" }
+        refresh: true
+  - do:
+      index:
+        index:   source
+        id:      2
+        body:    { "text": "test" }
+        refresh: true
+
+  # Fetch the http host. We use the host of the master because we know there will always be a master.
+  - do:
+      cluster.state: {}
+  - set: { master_node: master }
+  - do:
+      nodes.info:
+        metric: [ http ]
+  - is_true: nodes.$master.http.publish_address
+  - set: {nodes.$master.http.publish_address: host}
+  - do:
+      reindex:
+        refresh: true
+        body:
+          max_docs: 1
+          source:
+            remote:
+              host: http://${host}
+            index: source
+          dest:
+            index: dest
+  - match: {created: 1}
+  - match: {updated: 0}
+  - match: {version_conflicts: 0}
+  - match: {batches: 1}
+  - match: {failures: []}
+  - match: {throttled_millis: 0}
+  - gte: { took: 0 }
+  - is_false: task
+  - is_false: deleted
+
+  - do:
+      search:
+        rest_total_hits_as_int: true
         index: dest
         body:
           query:
@@ -286,7 +354,6 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
         refresh: true
@@ -318,7 +385,6 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
         refresh: true
@@ -340,7 +406,6 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test", "filtered": "removed" }
         refresh: true
@@ -380,7 +445,6 @@
   - do:
       get:
         index: dest
-        type: foo
         id: 1
   - match: { _source.text: "test" }
   - is_false: _source.filtered
@@ -399,19 +463,16 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
   - do:
       index:
         index:   source
-        type:    foo
         id:      2
         body:    { "text": "test" }
   - do:
       index:
         index:   source
-        type:    foo
         id:      3
         body:    { "text": "test" }
   - do:
@@ -455,6 +516,7 @@
 
   - do:
       search:
+        rest_total_hits_as_int: true
         index: dest
         body:
           query:

@@ -14,9 +14,8 @@ import org.elasticsearch.action.search.MultiSearchResponse;
 import org.elasticsearch.action.search.SearchPhaseExecutionException;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.xcontent.XContentType;
-import org.elasticsearch.xpack.core.security.SecurityField;
-import org.elasticsearch.xpack.core.security.authc.support.Hasher;
 import org.elasticsearch.test.SecurityIntegTestCase;
+import org.elasticsearch.xpack.core.security.SecurityField;
 import org.junit.After;
 import org.junit.Before;
 
@@ -26,22 +25,22 @@ import java.util.List;
 import java.util.Map;
 
 import static org.elasticsearch.action.support.WriteRequest.RefreshPolicy.IMMEDIATE;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertThrows;
 import static org.elasticsearch.xpack.core.security.authc.support.UsernamePasswordToken.BASIC_AUTH_HEADER;
 import static org.elasticsearch.xpack.core.security.authc.support.UsernamePasswordToken.basicAuthHeaderValue;
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertThrows;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 
 public class SecurityClearScrollTests extends SecurityIntegTestCase {
-    protected static final String USERS_PASSWD_HASHED = new String(Hasher.BCRYPT.hash(new SecureString("change_me".toCharArray())));
 
     private List<String> scrollIds;
 
     @Override
     protected String configUsers() {
+        final String usersPasswdHashed = new String(getFastStoredHashAlgoForTests().hash(new SecureString("change_me".toCharArray())));
         return super.configUsers() +
-            "allowed_user:" + USERS_PASSWD_HASHED + "\n" +
-            "denied_user:" + USERS_PASSWD_HASHED + "\n" ;
+            "allowed_user:" + usersPasswdHashed + "\n" +
+            "denied_user:" + usersPasswdHashed + "\n";
     }
 
     @Override
@@ -76,7 +75,7 @@ public class SecurityClearScrollTests extends SecurityIntegTestCase {
         MultiSearchRequestBuilder multiSearchRequestBuilder = client().prepareMultiSearch();
         int count = randomIntBetween(5, 15);
         for (int i = 0; i < count; i++) {
-            multiSearchRequestBuilder.add(client().prepareSearch("index").setTypes("type").setScroll("10m").setSize(1));
+            multiSearchRequestBuilder.add(client().prepareSearch("index").setScroll("10m").setSize(1));
         }
         MultiSearchResponse multiSearchResponse = multiSearchRequestBuilder.get();
         scrollIds = getScrollIds(multiSearchResponse);
@@ -94,7 +93,7 @@ public class SecurityClearScrollTests extends SecurityIntegTestCase {
         Map<String, String> headers = new HashMap<>();
         headers.put(SecurityField.USER_SETTING.getKey(), user);
         headers.put(BASIC_AUTH_HEADER, basicAuth);
-        ClearScrollResponse clearScrollResponse = internalCluster().transportClient().filterWithHeader(headers)
+        ClearScrollResponse clearScrollResponse = client().filterWithHeader(headers)
             .prepareClearScroll()
             .addScrollId("_all").get();
         assertThat(clearScrollResponse.isSucceeded(), is(true));
@@ -108,7 +107,7 @@ public class SecurityClearScrollTests extends SecurityIntegTestCase {
         Map<String, String> headers = new HashMap<>();
         headers.put(SecurityField.USER_SETTING.getKey(), user);
         headers.put(BASIC_AUTH_HEADER, basicAuth);
-        assertThrows(internalCluster().transportClient().filterWithHeader(headers)
+        assertThrows(client().filterWithHeader(headers)
                 .prepareClearScroll()
                 .addScrollId("_all"), ElasticsearchSecurityException.class,
                 "action [cluster:admin/indices/scroll/clear_all] is unauthorized for user [denied_user]");

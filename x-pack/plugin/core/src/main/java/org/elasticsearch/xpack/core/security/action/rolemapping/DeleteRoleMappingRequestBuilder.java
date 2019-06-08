@@ -13,13 +13,11 @@ import org.elasticsearch.client.ElasticsearchClient;
  * A builder for requests to delete a role-mapping from the
  * org.elasticsearch.xpack.security.authc.support.mapper.NativeRoleMappingStore
  */
-public class DeleteRoleMappingRequestBuilder extends ActionRequestBuilder<DeleteRoleMappingRequest,
-        DeleteRoleMappingResponse, DeleteRoleMappingRequestBuilder>
+public class DeleteRoleMappingRequestBuilder extends ActionRequestBuilder<DeleteRoleMappingRequest, DeleteRoleMappingResponse>
         implements WriteRequestBuilder<DeleteRoleMappingRequestBuilder> {
 
-    public DeleteRoleMappingRequestBuilder(ElasticsearchClient client,
-                                           DeleteRoleMappingAction action) {
-        super(client, action, new DeleteRoleMappingRequest());
+    public DeleteRoleMappingRequestBuilder(ElasticsearchClient client) {
+        super(client, DeleteRoleMappingAction.INSTANCE, new DeleteRoleMappingRequest());
     }
 
     public DeleteRoleMappingRequestBuilder name(String name) {

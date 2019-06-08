@@ -23,7 +23,6 @@ import com.carrotsearch.hppc.cursors.IntObjectCursor;
 import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
 
 import org.elasticsearch.ElasticsearchException;
-import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.support.DefaultShardOperationFailedException;
 import org.elasticsearch.cluster.node.DiscoveryNode;
@@ -164,10 +163,6 @@ public class IndicesShardStoresResponse extends ActionResponse implements ToXCon
         @Override
         public void readFrom(StreamInput in) throws IOException {
             node = new DiscoveryNode(in);
-            if (in.getVersion().before(Version.V_6_0_0_alpha1)) {
-                // legacy version
-                in.readLong();
-            }
             allocationId = in.readOptionalString();
             allocationStatus = AllocationStatus.readFrom(in);
             if (in.readBoolean()) {
@@ -178,10 +173,6 @@ public class IndicesShardStoresResponse extends ActionResponse implements ToXCon
         @Override
         public void writeTo(StreamOutput out) throws IOException {
             node.writeTo(out);
-            if (out.getVersion().before(Version.V_6_0_0_alpha1)) {
-                // legacy version
-                out.writeLong(-1L);
-            }
             out.writeOptionalString(allocationId);
             allocationStatus.writeTo(out);
             if (storeException != null) {
@@ -248,7 +239,7 @@ public class IndicesShardStoresResponse extends ActionResponse implements ToXCon
             return nodeId;
         }
 
-        public static Failure readFailure(StreamInput in) throws IOException {
+        static Failure readFailure(StreamInput in) throws IOException {
             Failure failure = new Failure();
             failure.readFrom(in);
             return failure;
@@ -268,8 +259,10 @@ public class IndicesShardStoresResponse extends ActionResponse implements ToXCon
 
         @Override
         public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+            builder.startObject();
             builder.field("node", nodeId());
-            super.toXContent(builder, params);
+            super.innerToXContent(builder, params);
+            builder.endObject();
             return builder;
         }
     }
@@ -277,13 +270,18 @@ public class IndicesShardStoresResponse extends ActionResponse implements ToXCon
     private ImmutableOpenMap<String, ImmutableOpenIntMap<List<StoreStatus>>> storeStatuses;
     private List<Failure> failures;
 
-    public IndicesShardStoresResponse(ImmutableOpenMap<String, ImmutableOpenIntMap<List<StoreStatus>>> storeStatuses, List<Failure> failures) {
+    public IndicesShardStoresResponse(ImmutableOpenMap<String, ImmutableOpenIntMap<List<StoreStatus>>> storeStatuses,
+                                      List<Failure> failures) {
         this.storeStatuses = storeStatuses;
         this.failures = failures;
     }
 
     IndicesShardStoresResponse() {
-        this(ImmutableOpenMap.<String, ImmutableOpenIntMap<List<StoreStatus>>>of(), Collections.<Failure>emptyList());
+        this(ImmutableOpenMap.of(), Collections.emptyList());
+    }
+
+    public IndicesShardStoresResponse(StreamInput in) throws IOException {
+        readFrom(in);
     }
 
     /**
@@ -357,9 +355,7 @@ public class IndicesShardStoresResponse extends ActionResponse implements ToXCon
         if (failures.size() > 0) {
             builder.startArray(Fields.FAILURES);
             for (Failure failure : failures) {
-                builder.startObject();
                 failure.toXContent(builder, params);
-                builder.endObject();
             }
             builder.endArray();
         }

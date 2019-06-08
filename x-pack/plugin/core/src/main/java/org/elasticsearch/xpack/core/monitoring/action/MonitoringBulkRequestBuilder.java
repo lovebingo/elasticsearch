@@ -14,7 +14,7 @@ import org.elasticsearch.xpack.core.monitoring.MonitoredSystem;
 import java.io.IOException;
 
 public class MonitoringBulkRequestBuilder
-        extends ActionRequestBuilder<MonitoringBulkRequest, MonitoringBulkResponse, MonitoringBulkRequestBuilder> {
+        extends ActionRequestBuilder<MonitoringBulkRequest, MonitoringBulkResponse> {
 
     public MonitoringBulkRequestBuilder(ElasticsearchClient client) {
         super(client, MonitoringBulkAction.INSTANCE, new MonitoringBulkRequest());
@@ -26,12 +26,11 @@ public class MonitoringBulkRequestBuilder
     }
 
     public MonitoringBulkRequestBuilder add(final MonitoredSystem system,
-                                            final String type,
                                             final BytesReference content,
                                             final XContentType xContentType,
                                             final long timestamp,
                                             final long intervalMillis) throws IOException {
-        request.add(system, type, content, xContentType, timestamp, intervalMillis);
+        request.add(system, content, xContentType, timestamp, intervalMillis);
         return this;
     }
 

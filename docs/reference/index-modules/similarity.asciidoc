@@ -44,7 +44,7 @@ Here we configure the DFRSimilarity so it can be referenced as
 
 [source,js]
 --------------------------------------------------
-PUT /index/_mapping/_doc
+PUT /index/_mapping
 {
   "properties" : {
     "title" : { "type" : "text", "similarity" : "my_similarity" }
@@ -92,22 +92,14 @@ from randomness] framework. This similarity has the following options:
 
 [horizontal]
 `basic_model`::
-    Possible values: {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelG.html[`be`],
-    {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelD.html[`d`],
-    {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelG.html[`g`],
+    Possible values: {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelG.html[`g`],
     {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelIF.html[`if`],
-    {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelIn.html[`in`],
-    {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelIne.html[`ine`] and
-    {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelP.html[`p`].
-
-`be`, `d` and `p` should be avoided in practice as they might return scores that
-are equal to 0 or infinite with terms that do not meet the expected random
-distribution.
+    {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelIn.html[`in`] and
+    {lucene-core-javadoc}/org/apache/lucene/search/similarities/BasicModelIne.html[`ine`].
 
 `after_effect`::
-    Possible values: {lucene-core-javadoc}/org/apache/lucene/search/similarities/AfterEffect.NoAfterEffect.html[`no`],
-    {lucene-core-javadoc}/org/apache/lucene/search/similarities/AfterEffectB.html[`b`] and
-    {lucene-core-javadoc}/org/apache/lucene/search/similarities/AfterEffectL.html[`l`].
+    Possible values: {lucene-core-javadoc}/org/apache/lucene/search/similarities/AfterEffectB.html[`b`] and
+    {lucene-core-javadoc}/org/apache/lucene/search/similarities/AfterEffectB.html[`l`].
 
 `normalization`::
     Possible values: {lucene-core-javadoc}/org/apache/lucene/search/similarities/Normalization.NoNormalization.html[`no`],
@@ -214,12 +206,10 @@ PUT /index
     }
   },
   "mappings": {
-    "_doc": {
-      "properties": {
-        "field": {
-          "type": "text",
-          "similarity": "scripted_tfidf"
-        }
+    "properties": {
+      "field": {
+        "type": "text",
+        "similarity": "scripted_tfidf"
       }
     }
   }
@@ -263,7 +253,10 @@ Which yields:
     "failed": 0
   },
   "hits": {
-    "total": 1,
+    "total": {
+        "value": 1,
+        "relation": "eq"
+    },
     "max_score": 1.9508477,
     "hits": [
       {
@@ -295,27 +288,27 @@ Which yields:
                   "details": []
                 },
                 {
-                  "value": 2.0,
+                  "value": 2,
                   "description": "field.docCount",
                   "details": []
                 },
                 {
-                  "value": 4.0,
+                  "value": 4,
                   "description": "field.sumDocFreq",
                   "details": []
                 },
                 {
-                  "value": 5.0,
+                  "value": 5,
                   "description": "field.sumTotalTermFreq",
                   "details": []
                 },
                 {
-                  "value": 1.0,
+                  "value": 1,
                   "description": "term.docFreq",
                   "details": []
                 },
                 {
-                  "value": 2.0,
+                  "value": 2,
                   "description": "term.totalTermFreq",
                   "details": []
                 },
@@ -325,7 +318,7 @@ Which yields:
                   "details": []
                 },
                 {
-                  "value": 3.0,
+                  "value": 3,
                   "description": "doc.length",
                   "details": []
                 }
@@ -341,7 +334,18 @@ Which yields:
 // TESTRESPONSE[s/"took": 12/"took" : $body.took/]
 // TESTRESPONSE[s/OzrdjxNtQGaqs4DmioFw9A/$body.hits.hits.0._node/]
 
-You might have noticed that a significant part of the script depends on
+WARNING: While scripted similarities provide a lot of flexibility, there is
+a set of rules that they need to satisfy. Failing to do so could make
+Elasticsearch silently return wrong top hits or fail with internal errors at
+search time:
+
+ - Returned scores must be positive.
+ - All other variables remaining equal, scores must not decrease when
+   `doc.freq` increases.
+ - All other variables remaining equal, scores must not increase when
+   `doc.length` increases.
+
+You might have noticed that a significant part of the above script depends on
 statistics that are the same for every document. It is possible to make the
 above slightly more efficient by providing an `weight_script` which will
 compute the document-independent part of the score and will be available
@@ -372,12 +376,10 @@ PUT /index
     }
   },
   "mappings": {
-    "_doc": {
-      "properties": {
-        "field": {
-          "type": "text",
-          "similarity": "scripted_tfidf"
-        }
+    "properties": {
+      "field": {
+        "type": "text",
+        "similarity": "scripted_tfidf"
       }
     }
   }
@@ -426,7 +428,10 @@ GET /index/_search?explain=true
     "failed": 0
   },
   "hits": {
-    "total": 1,
+    "total": {
+        "value": 1,
+        "relation": "eq"
+    },
     "max_score": 1.9508477,
     "hits": [
       {
@@ -458,27 +463,27 @@ GET /index/_search?explain=true
                   "details": []
                 },
                 {
-                  "value": 2.0,
+                  "value": 2,
                   "description": "field.docCount",
                   "details": []
                 },
                 {
-                  "value": 4.0,
+                  "value": 4,
                   "description": "field.sumDocFreq",
                   "details": []
                 },
                 {
-                  "value": 5.0,
+                  "value": 5,
                   "description": "field.sumTotalTermFreq",
                   "details": []
                 },
                 {
-                  "value": 1.0,
+                  "value": 1,
                   "description": "term.docFreq",
                   "details": []
                 },
                 {
-                  "value": 2.0,
+                  "value": 2,
                   "description": "term.totalTermFreq",
                   "details": []
                 },
@@ -488,7 +493,7 @@ GET /index/_search?explain=true
                   "details": []
                 },
                 {
-                  "value": 3.0,
+                  "value": 3,
                   "description": "doc.length",
                   "details": []
                 }
@@ -505,7 +510,6 @@ GET /index/_search?explain=true
 // TESTRESPONSE[s/OzrdjxNtQGaqs4DmioFw9A/$body.hits.hits.0._node/]
 
 ////////////////////
-
 
 Type name: `scripted`
 

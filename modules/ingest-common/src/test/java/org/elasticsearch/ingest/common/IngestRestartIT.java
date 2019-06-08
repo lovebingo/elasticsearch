@@ -19,9 +19,7 @@
 package org.elasticsearch.ingest.common;
 
 import org.elasticsearch.ElasticsearchException;
-import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.support.WriteRequest;
-import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.settings.Settings;
@@ -60,9 +58,7 @@ public class IngestRestartIT extends ESIntegTestCase {
     public static class CustomScriptPlugin extends MockScriptPlugin {
         @Override
         protected Map<String, Function<Map<String, Object>, Object>> pluginScripts() {
-            return Collections.singletonMap("my_script", script -> {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> ctx = (Map) script.get("ctx");
+            return Collections.singletonMap("my_script", ctx -> {
                 ctx.put("z", 0);
                 return null;
             });
@@ -95,9 +91,15 @@ public class IngestRestartIT extends ESIntegTestCase {
         checkPipelineExists.accept(pipelineIdWithoutScript);
 
 
-        internalCluster().stopCurrentMasterNode();
-        internalCluster().startNode(Settings.builder().put("script.allowed_types", "none"));
+        internalCluster().restartNode(internalCluster().getMasterName(), new InternalTestCluster.RestartCallback() {
 
+            @Override
+            public Settings onNodeStopped(String nodeName) {
+                return Settings.builder().put("script.allowed_types", "none").build();
+            }
+
+        });
+        
         checkPipelineExists.accept(pipelineIdWithoutScript);
         checkPipelineExists.accept(pipelineIdWithScript);
 

@@ -6,6 +6,7 @@
 package org.elasticsearch.license;
 
 import org.elasticsearch.ElasticsearchSecurityException;
+import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.rest.RestStatus;
 
 public class LicenseUtils {
@@ -42,8 +43,18 @@ public class LicenseUtils {
      * Checks if the signature of a self generated license with older version needs to be
      * recreated with the new key
      */
-    public static boolean signatureNeedsUpdate(License license) {
+    public static boolean signatureNeedsUpdate(License license, DiscoveryNodes currentNodes) {
+        assert License.VERSION_CRYPTO_ALGORITHMS == License.VERSION_CURRENT : "update this method when adding a new version";
+
         return ("basic".equals(license.type()) || "trial".equals(license.type())) &&
-                (license.version() < License.VERSION_CRYPTO_ALGORITHMS);
+                // only upgrade signature when all nodes are ready to deserialize the new signature
+                (license.version() < License.VERSION_CRYPTO_ALGORITHMS &&
+                    compatibleLicenseVersion(currentNodes) == License.VERSION_CRYPTO_ALGORITHMS
+                );
+    }
+
+    public static int compatibleLicenseVersion(DiscoveryNodes currentNodes) {
+        assert License.VERSION_CRYPTO_ALGORITHMS == License.VERSION_CURRENT : "update this method when adding a new version";
+        return License.VERSION_CRYPTO_ALGORITHMS;
     }
 }

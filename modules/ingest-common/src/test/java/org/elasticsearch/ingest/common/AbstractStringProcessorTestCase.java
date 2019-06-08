@@ -31,15 +31,19 @@ import static org.elasticsearch.ingest.IngestDocumentMatcher.assertIngestDocumen
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 
-public abstract class AbstractStringProcessorTestCase extends ESTestCase {
+public abstract class AbstractStringProcessorTestCase<T> extends ESTestCase {
 
-    protected abstract AbstractStringProcessor newProcessor(String field, boolean ignoreMissing, String targetField);
+    protected abstract AbstractStringProcessor<T> newProcessor(String field, boolean ignoreMissing, String targetField);
 
     protected String modifyInput(String input) {
         return input;
     }
 
-    protected abstract String expectedResult(String input);
+    protected abstract T expectedResult(String input);
+
+    protected Class<?> expectedResultType(){
+        return String.class;  // most results types are Strings
+    }
 
     public void testProcessor() throws Exception {
         IngestDocument ingestDocument = RandomDocumentPicks.randomIngestDocument(random());
@@ -47,7 +51,7 @@ public abstract class AbstractStringProcessorTestCase extends ESTestCase {
         String fieldName = RandomDocumentPicks.addRandomField(random(), ingestDocument, modifyInput(fieldValue));
         Processor processor = newProcessor(fieldName, randomBoolean(), fieldName);
         processor.execute(ingestDocument);
-        assertThat(ingestDocument.getFieldValue(fieldName, String.class), equalTo(expectedResult(fieldValue)));
+        assertThat(ingestDocument.getFieldValue(fieldName, expectedResultType()), equalTo(expectedResult(fieldValue)));
     }
 
     public void testFieldNotFound() throws Exception {
@@ -109,6 +113,6 @@ public abstract class AbstractStringProcessorTestCase extends ESTestCase {
         String targetFieldName = fieldName + "foo";
         Processor processor = newProcessor(fieldName, randomBoolean(), targetFieldName);
         processor.execute(ingestDocument);
-        assertThat(ingestDocument.getFieldValue(targetFieldName, String.class), equalTo(expectedResult(fieldValue)));
+        assertThat(ingestDocument.getFieldValue(targetFieldName, expectedResultType()), equalTo(expectedResult(fieldValue)));
     }
 }

@@ -19,6 +19,7 @@
 
 package org.elasticsearch.indices.store;
 
+import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.FailedNodeException;
@@ -30,7 +31,6 @@ import org.elasticsearch.action.support.nodes.BaseNodesResponse;
 import org.elasticsearch.action.support.nodes.TransportNodesAction;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
-import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
@@ -67,19 +67,22 @@ public class TransportNodesListShardStoreMetaData extends TransportNodesAction<T
 
     public static final String ACTION_NAME = "internal:cluster/nodes/indices/shard/store";
 
+    private final Settings settings;
     private final IndicesService indicesService;
-
     private final NodeEnvironment nodeEnv;
+    private final NamedXContentRegistry namedXContentRegistry;
 
     @Inject
     public TransportNodesListShardStoreMetaData(Settings settings, ThreadPool threadPool,
                                                 ClusterService clusterService, TransportService transportService,
-                                                IndicesService indicesService, NodeEnvironment nodeEnv, ActionFilters actionFilters,
-                                                IndexNameExpressionResolver indexNameExpressionResolver) {
-        super(settings, ACTION_NAME, threadPool, clusterService, transportService, actionFilters, indexNameExpressionResolver,
+                                                IndicesService indicesService, NodeEnvironment nodeEnv,
+                                                ActionFilters actionFilters, NamedXContentRegistry namedXContentRegistry) {
+        super(ACTION_NAME, threadPool, clusterService, transportService, actionFilters,
             Request::new, NodeRequest::new, ThreadPool.Names.FETCH_SHARD_STORE, NodeStoreFilesMetaData.class);
+        this.settings = settings;
         this.indicesService = indicesService;
         this.nodeEnv = nodeEnv;
+        this.namedXContentRegistry = namedXContentRegistry;
     }
 
     @Override
@@ -121,8 +124,17 @@ public class TransportNodesListShardStoreMetaData extends TransportNodesAction<T
             if (indexService != null) {
                 IndexShard indexShard = indexService.getShardOrNull(shardId.id());
                 if (indexShard != null) {
-                    exists = true;
-                    return new StoreFilesMetaData(shardId, indexShard.snapshotStoreMetadata());
+                    try {
+                        final StoreFilesMetaData storeFilesMetaData = new StoreFilesMetaData(shardId, indexShard.snapshotStoreMetadata());
+                        exists = true;
+                        return storeFilesMetaData;
+                    } catch (org.apache.lucene.index.IndexNotFoundException e) {
+                        logger.trace(new ParameterizedMessage("[{}] node is missing index, responding with empty", shardId), e);
+                        return new StoreFilesMetaData(shardId, Store.MetadataSnapshot.EMPTY);
+                    } catch (IOException e) {
+                        logger.warn(new ParameterizedMessage("[{}] can't read metadata from store, responding with empty", shardId), e);
+                        return new StoreFilesMetaData(shardId, Store.MetadataSnapshot.EMPTY);
+                    }
                 }
             }
             // try and see if we an list unallocated
@@ -131,14 +143,15 @@ public class TransportNodesListShardStoreMetaData extends TransportNodesAction<T
                 // we may send this requests while processing the cluster state that recovered the index
                 // sometimes the request comes in before the local node processed that cluster state
                 // in such cases we can load it from disk
-                metaData = IndexMetaData.FORMAT.loadLatestState(logger, NamedXContentRegistry.EMPTY,
+                metaData = IndexMetaData.FORMAT.loadLatestState(logger, namedXContentRegistry,
                     nodeEnv.indexPaths(shardId.getIndex()));
             }
             if (metaData == null) {
                 logger.trace("{} node doesn't have meta data for the requests index, responding with empty", shardId);
                 return new StoreFilesMetaData(shardId, Store.MetadataSnapshot.EMPTY);
             }
-            final IndexSettings indexSettings = indexService != null ? indexService.getIndexSettings() : new IndexSettings(metaData, settings);
+            final IndexSettings indexSettings = indexService != null ? indexService.getIndexSettings() :
+                new IndexSettings(metaData, settings);
             final ShardPath shardPath = ShardPath.loadShardPath(logger, nodeEnv, shardId, indexSettings);
             if (shardPath == null) {
                 return new StoreFilesMetaData(shardId, Store.MetadataSnapshot.EMPTY);
@@ -200,7 +213,7 @@ public class TransportNodesListShardStoreMetaData extends TransportNodesAction<T
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            shardId = ShardId.readShardId(in);
+            shardId = new ShardId(in);
             this.metadataSnapshot = new Store.MetadataSnapshot(in);
         }
 
@@ -242,7 +255,7 @@ public class TransportNodesListShardStoreMetaData extends TransportNodesAction<T
         @Override
         public void readFrom(StreamInput in) throws IOException {
             super.readFrom(in);
-            shardId = ShardId.readShardId(in);
+            shardId = new ShardId(in);
         }
 
         @Override
@@ -253,9 +266,6 @@ public class TransportNodesListShardStoreMetaData extends TransportNodesAction<T
     }
 
     public static class NodesStoreFilesMetaData extends BaseNodesResponse<NodeStoreFilesMetaData> {
-
-        NodesStoreFilesMetaData() {
-        }
 
         public NodesStoreFilesMetaData(ClusterName clusterName, List<NodeStoreFilesMetaData> nodes, List<FailedNodeException> failures) {
             super(clusterName, nodes, failures);
@@ -288,7 +298,7 @@ public class TransportNodesListShardStoreMetaData extends TransportNodesAction<T
         @Override
         public void readFrom(StreamInput in) throws IOException {
             super.readFrom(in);
-            shardId = ShardId.readShardId(in);
+            shardId = new ShardId(in);
         }
 
         @Override

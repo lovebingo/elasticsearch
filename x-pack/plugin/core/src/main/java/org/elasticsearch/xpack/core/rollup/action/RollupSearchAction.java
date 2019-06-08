@@ -10,8 +10,9 @@ import org.elasticsearch.action.ActionRequestBuilder;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.common.io.stream.Writeable;
 
-public class RollupSearchAction extends Action<SearchRequest, SearchResponse, RollupSearchAction.RequestBuilder> {
+public class RollupSearchAction extends Action<SearchResponse> {
 
     public static final RollupSearchAction INSTANCE = new RollupSearchAction();
     public static final String NAME = "indices:admin/xpack/rollup/search";
@@ -21,18 +22,18 @@ public class RollupSearchAction extends Action<SearchRequest, SearchResponse, Ro
     }
 
     @Override
-    public RequestBuilder newRequestBuilder(ElasticsearchClient client) {
-        return new RequestBuilder(client);
+    public SearchResponse newResponse() {
+        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
     }
 
     @Override
-    public SearchResponse newResponse() {
-        return new SearchResponse();
+    public Writeable.Reader<SearchResponse> getResponseReader() {
+        return SearchResponse::new;
     }
 
-    static class RequestBuilder extends ActionRequestBuilder<SearchRequest, SearchResponse, RequestBuilder> {
-        RequestBuilder(ElasticsearchClient client) {
-            super(client, INSTANCE, new SearchRequest());
+    public static class RequestBuilder extends ActionRequestBuilder<SearchRequest, SearchResponse> {
+        public RequestBuilder(ElasticsearchClient client, SearchRequest searchRequest) {
+            super(client, INSTANCE, searchRequest);
         }
     }
 }

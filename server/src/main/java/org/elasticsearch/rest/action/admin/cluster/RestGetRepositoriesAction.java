@@ -20,7 +20,6 @@
 package org.elasticsearch.rest.action.admin.cluster;
 
 import org.elasticsearch.action.admin.cluster.repositories.get.GetRepositoriesRequest;
-import org.elasticsearch.action.admin.cluster.repositories.get.GetRepositoriesResponse;
 import org.elasticsearch.client.node.NodeClient;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.Settings;
@@ -52,7 +51,7 @@ public class RestGetRepositoriesAction extends BaseRestHandler {
 
     @Override
     public String getName() {
-        return "get_respositories_action";
+        return "get_repositories_action";
     }
 
     @Override

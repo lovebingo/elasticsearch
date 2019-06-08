@@ -41,25 +41,20 @@ public abstract class ReindexTestCase extends ESIntegTestCase {
         return Arrays.asList(ReindexPlugin.class);
     }
 
-    @Override
-    protected Collection<Class<? extends Plugin>> transportClientPlugins() {
-        return Arrays.asList(ReindexPlugin.class);
-    }
-
     protected ReindexRequestBuilder reindex() {
-        return ReindexAction.INSTANCE.newRequestBuilder(client());
+        return new ReindexRequestBuilder(client(), ReindexAction.INSTANCE);
     }
 
     protected UpdateByQueryRequestBuilder updateByQuery() {
-        return UpdateByQueryAction.INSTANCE.newRequestBuilder(client());
+        return new UpdateByQueryRequestBuilder(client(), UpdateByQueryAction.INSTANCE);
     }
 
     protected DeleteByQueryRequestBuilder deleteByQuery() {
-        return DeleteByQueryAction.INSTANCE.newRequestBuilder(client());
+        return new DeleteByQueryRequestBuilder(client(), DeleteByQueryAction.INSTANCE);
     }
 
     protected RethrottleRequestBuilder rethrottle() {
-        return RethrottleAction.INSTANCE.newRequestBuilder(client());
+        return new RethrottleRequestBuilder(client(), RethrottleAction.INSTANCE);
     }
 
     public static BulkIndexByScrollResponseMatcher matcher() {

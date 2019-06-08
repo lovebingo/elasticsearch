@@ -16,10 +16,10 @@ import org.elasticsearch.xpack.sql.expression.function.scalar.datetime.DateTimeP
 import org.elasticsearch.xpack.sql.expression.function.scalar.math.MathFunctionProcessorTests;
 import org.elasticsearch.xpack.sql.expression.function.scalar.math.MathProcessor;
 import org.elasticsearch.xpack.sql.expression.function.scalar.math.MathProcessor.MathOperation;
-import org.elasticsearch.xpack.sql.expression.function.scalar.processor.runtime.ChainingProcessor;
-import org.elasticsearch.xpack.sql.expression.function.scalar.processor.runtime.ChainingProcessorTests;
-import org.elasticsearch.xpack.sql.expression.function.scalar.processor.runtime.HitExtractorProcessor;
-import org.elasticsearch.xpack.sql.expression.function.scalar.processor.runtime.Processor;
+import org.elasticsearch.xpack.sql.expression.gen.processor.ChainingProcessor;
+import org.elasticsearch.xpack.sql.expression.gen.processor.ChainingProcessorTests;
+import org.elasticsearch.xpack.sql.expression.gen.processor.HitExtractorProcessor;
+import org.elasticsearch.xpack.sql.expression.gen.processor.Processor;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -29,6 +29,7 @@ import java.util.function.Supplier;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.elasticsearch.xpack.sql.util.CollectionUtils.combine;
+import static org.elasticsearch.xpack.sql.util.DateUtils.UTC;
 
 public class ComputingExtractorTests extends AbstractWireSerializingTestCase<ComputingExtractor> {
     public static ComputingExtractor randomComputingExtractor() {
@@ -70,7 +71,7 @@ public class ComputingExtractorTests extends AbstractWireSerializingTestCase<Com
     public void testGet() {
         String fieldName = randomAlphaOfLength(5);
         ChainingProcessor extractor = new ChainingProcessor(
-            new HitExtractorProcessor(new FieldHitExtractor(fieldName, null, true)),
+            new HitExtractorProcessor(new FieldHitExtractor(fieldName, null, UTC, true, false)),
             new MathProcessor(MathOperation.LOG));
 
         int times = between(1, 1000);

@@ -5,7 +5,6 @@
  */
 package org.elasticsearch.xpack.core.security.action.token;
 
-import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.common.Nullable;
@@ -15,10 +14,14 @@ import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.SecureString;
-import org.elasticsearch.xpack.core.security.authc.support.CharArrays;
+import org.elasticsearch.common.CharArrays;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 
@@ -28,6 +31,37 @@ import static org.elasticsearch.action.ValidateActions.addValidationError;
  * <code>refresh_token</code> grant type.
  */
 public final class CreateTokenRequest extends ActionRequest {
+
+    public enum GrantType {
+        PASSWORD("password"),
+        REFRESH_TOKEN("refresh_token"),
+        AUTHORIZATION_CODE("authorization_code"),
+        CLIENT_CREDENTIALS("client_credentials");
+
+        private final String value;
+
+        GrantType(String value) {
+            this.value = value;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public static GrantType fromString(String grantType) {
+            if (grantType != null) {
+                for (GrantType type : values()) {
+                    if (type.getValue().equals(grantType)) {
+                        return type;
+                    }
+                }
+            }
+            return null;
+        }
+    }
+
+    private static final Set<GrantType> SUPPORTED_GRANT_TYPES = Collections.unmodifiableSet(
+        EnumSet.of(GrantType.PASSWORD, GrantType.REFRESH_TOKEN, GrantType.CLIENT_CREDENTIALS));
 
     private String grantType;
     private String username;
@@ -49,33 +83,58 @@ public final class CreateTokenRequest extends ActionRequest {
     @Override
     public ActionRequestValidationException validate() {
         ActionRequestValidationException validationException = null;
-        if ("password".equals(grantType)) {
-            if (Strings.isNullOrEmpty(username)) {
-                validationException = addValidationError("username is missing", validationException);
-            }
-            if (password == null || password.getChars() == null || password.getChars().length == 0) {
-                validationException = addValidationError("password is missing", validationException);
-            }
-            if (refreshToken != null) {
-                validationException =
-                        addValidationError("refresh_token is not supported with the password grant_type", validationException);
-            }
-        } else if ("refresh_token".equals(grantType)) {
-            if (username != null) {
-                validationException =
-                        addValidationError("username is not supported with the refresh_token grant_type", validationException);
-            }
-            if (password != null) {
-                validationException =
-                        addValidationError("password is not supported with the refresh_token grant_type", validationException);
-            }
-            if (refreshToken == null) {
-                validationException = addValidationError("refresh_token is missing", validationException);
+        GrantType type = GrantType.fromString(grantType);
+        if (type != null) {
+            switch (type) {
+                case PASSWORD:
+                    if (Strings.isNullOrEmpty(username)) {
+                        validationException = addValidationError("username is missing", validationException);
+                    }
+                    if (password == null || password.getChars() == null || password.getChars().length == 0) {
+                        validationException = addValidationError("password is missing", validationException);
+                    }
+                    if (refreshToken != null) {
+                        validationException =
+                            addValidationError("refresh_token is not supported with the password grant_type", validationException);
+                    }
+                    break;
+                case REFRESH_TOKEN:
+                    if (username != null) {
+                        validationException =
+                            addValidationError("username is not supported with the refresh_token grant_type", validationException);
+                    }
+                    if (password != null) {
+                        validationException =
+                            addValidationError("password is not supported with the refresh_token grant_type", validationException);
+                    }
+                    if (refreshToken == null) {
+                        validationException = addValidationError("refresh_token is missing", validationException);
+                    }
+                    break;
+                case CLIENT_CREDENTIALS:
+                    if (username != null) {
+                        validationException =
+                            addValidationError("username is not supported with the client_credentials grant_type", validationException);
+                    }
+                    if (password != null) {
+                        validationException =
+                            addValidationError("password is not supported with the client_credentials grant_type", validationException);
+                    }
+                    if (refreshToken != null) {
+                        validationException = addValidationError("refresh_token is not supported with the client_credentials grant_type",
+                            validationException);
+                    }
+                    break;
+                default:
+                    validationException = addValidationError("grant_type only supports the values: [" +
+                            SUPPORTED_GRANT_TYPES.stream().map(GrantType::getValue).collect(Collectors.joining(", ")) + "]",
+                        validationException);
             }
         } else {
-            validationException = addValidationError("grant_type only supports the values: [password, refresh_token]", validationException);
+            validationException = addValidationError("grant_type only supports the values: [" +
+                    SUPPORTED_GRANT_TYPES.stream().map(GrantType::getValue).collect(Collectors.joining(", ")) + "]",
+                validationException);
         }
-
         return validationException;
     }
 
@@ -127,32 +186,18 @@ public final class CreateTokenRequest extends ActionRequest {
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeString(grantType);
-        if (out.getVersion().onOrAfter(Version.V_6_2_0)) {
-            out.writeOptionalString(username);
-            if (password == null) {
-                out.writeOptionalBytesReference(null);
-            } else {
-                final byte[] passwordBytes = CharArrays.toUtf8Bytes(password.getChars());
-                try {
-                    out.writeOptionalBytesReference(new BytesArray(passwordBytes));
-                } finally {
-                    Arrays.fill(passwordBytes, (byte) 0);
-                }
-            }
-            out.writeOptionalString(refreshToken);
+        out.writeOptionalString(username);
+        if (password == null) {
+            out.writeOptionalBytesReference(null);
         } else {
-            if ("refresh_token".equals(grantType)) {
-                throw new IllegalArgumentException("a refresh request cannot be sent to an older version");
-            } else {
-                out.writeString(username);
-                final byte[] passwordBytes = CharArrays.toUtf8Bytes(password.getChars());
-                try {
-                    out.writeByteArray(passwordBytes);
-                } finally {
-                    Arrays.fill(passwordBytes, (byte) 0);
-                }
+            final byte[] passwordBytes = CharArrays.toUtf8Bytes(password.getChars());
+            try {
+                out.writeOptionalBytesReference(new BytesArray(passwordBytes));
+            } finally {
+                Arrays.fill(passwordBytes, (byte) 0);
             }
         }
+        out.writeOptionalString(refreshToken);
         out.writeOptionalString(scope);
     }
 
@@ -160,29 +205,19 @@ public final class CreateTokenRequest extends ActionRequest {
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         grantType = in.readString();
-        if (in.getVersion().onOrAfter(Version.V_6_2_0)) {
-            username = in.readOptionalString();
-            BytesReference bytesRef = in.readOptionalBytesReference();
-            if (bytesRef != null) {
-                byte[] bytes = BytesReference.toBytes(bytesRef);
-                try {
-                    password = new SecureString(CharArrays.utf8BytesToChars(bytes));
-                } finally {
-                    Arrays.fill(bytes, (byte) 0);
-                }
-            } else {
-                password = null;
-            }
-            refreshToken = in.readOptionalString();
-        } else {
-            username = in.readString();
-            final byte[] passwordBytes = in.readByteArray();
+        username = in.readOptionalString();
+        BytesReference bytesRef = in.readOptionalBytesReference();
+        if (bytesRef != null) {
+            byte[] bytes = BytesReference.toBytes(bytesRef);
             try {
-                password = new SecureString(CharArrays.utf8BytesToChars(passwordBytes));
+                password = new SecureString(CharArrays.utf8BytesToChars(bytes));
             } finally {
-                Arrays.fill(passwordBytes, (byte) 0);
+                Arrays.fill(bytes, (byte) 0);
             }
+        } else {
+            password = null;
         }
+        refreshToken = in.readOptionalString();
         scope = in.readOptionalString();
     }
 }

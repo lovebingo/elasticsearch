@@ -20,9 +20,9 @@
 package org.elasticsearch.action.search;
 
 import org.elasticsearch.action.Action;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.common.io.stream.Writeable;
 
-public class SearchScrollAction extends Action<SearchScrollRequest, SearchResponse, SearchScrollRequestBuilder> {
+public class SearchScrollAction extends Action<SearchResponse> {
 
     public static final SearchScrollAction INSTANCE = new SearchScrollAction();
     public static final String NAME = "indices:data/read/scroll";
@@ -33,11 +33,11 @@ public class SearchScrollAction extends Action<SearchScrollRequest, SearchRespon
 
     @Override
     public SearchResponse newResponse() {
-        return new SearchResponse();
+        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
     }
 
     @Override
-    public SearchScrollRequestBuilder newRequestBuilder(ElasticsearchClient client) {
-        return new SearchScrollRequestBuilder(client, this);
+    public Writeable.Reader<SearchResponse> getResponseReader() {
+        return SearchResponse::new;
     }
 }

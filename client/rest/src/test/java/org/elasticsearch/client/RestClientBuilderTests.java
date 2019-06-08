@@ -39,34 +39,47 @@ public class RestClientBuilderTests extends RestClientTestCase {
         try {
             RestClient.builder((HttpHost[])null);
             fail("should have failed");
-        } catch(NullPointerException e) {
-            assertEquals("hosts must not be null", e.getMessage());
+        } catch(IllegalArgumentException e) {
+            assertEquals("hosts must not be null nor empty", e.getMessage());
         }
 
         try {
-            RestClient.builder();
+            RestClient.builder(new HttpHost[] {});
             fail("should have failed");
         } catch(IllegalArgumentException e) {
-            assertEquals("no hosts provided", e.getMessage());
+            assertEquals("hosts must not be null nor empty", e.getMessage());
+        }
+
+        try {
+            RestClient.builder((Node[])null);
+            fail("should have failed");
+        } catch(IllegalArgumentException e) {
+            assertEquals("nodes must not be null or empty", e.getMessage());
+        }
+
+        try {
+            RestClient.builder(new Node[] {});
+            fail("should have failed");
+        } catch(IllegalArgumentException e) {
+            assertEquals("nodes must not be null or empty", e.getMessage());
+        }
+
+        try {
+            RestClient.builder(new Node(new HttpHost("localhost", 9200)), null);
+            fail("should have failed");
+        } catch(IllegalArgumentException e) {
+            assertEquals("node cannot be null", e.getMessage());
         }
 
         try {
             RestClient.builder(new HttpHost("localhost", 9200), null);
             fail("should have failed");
-        } catch(NullPointerException e) {
+        } catch(IllegalArgumentException e) {
             assertEquals("host cannot be null", e.getMessage());
         }
 
         try (RestClient restClient = RestClient.builder(new HttpHost("localhost", 9200)).build()) {
             assertNotNull(restClient);
-        }
-
-        try {
-            RestClient.builder(new HttpHost("localhost", 9200))
-                    .setMaxRetryTimeoutMillis(randomIntBetween(Integer.MIN_VALUE, 0));
-            fail("should have failed");
-        } catch(IllegalArgumentException e) {
-            assertEquals("maxRetryTimeoutMillis must be greater than 0", e.getMessage());
         }
 
         try {
@@ -135,12 +148,9 @@ public class RestClientBuilderTests extends RestClientTestCase {
             builder.setDefaultHeaders(headers);
         }
         if (randomBoolean()) {
-            builder.setMaxRetryTimeoutMillis(randomIntBetween(1, Integer.MAX_VALUE));
-        }
-        if (randomBoolean()) {
-            String pathPrefix = (randomBoolean() ? "/" : "") + randomAsciiOfLengthBetween(2, 5);
+            String pathPrefix = (randomBoolean() ? "/" : "") + randomAsciiLettersOfLengthBetween(2, 5);
             while (pathPrefix.length() < 20 && randomBoolean()) {
-                pathPrefix += "/" + randomAsciiOfLengthBetween(3, 6);
+                pathPrefix += "/" + randomAsciiLettersOfLengthBetween(3, 6);
             }
             builder.setPathPrefix(pathPrefix + (randomBoolean() ? "/" : ""));
         }
@@ -159,7 +169,6 @@ public class RestClientBuilderTests extends RestClientTestCase {
     }
 
     public void testSetPathPrefixEmpty() {
-        assertSetPathPrefixThrows("/");
         assertSetPathPrefixThrows("");
     }
 

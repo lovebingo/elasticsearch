@@ -5,22 +5,24 @@
  */
 package org.elasticsearch.example.role;
 
-import org.apache.http.message.BasicHeader;
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
-import org.elasticsearch.common.network.NetworkModule;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.client.security.PutUserRequest;
+import org.elasticsearch.client.security.RefreshPolicy;
+import org.elasticsearch.client.security.user.User;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.example.realm.CustomRealm;
-import org.elasticsearch.plugins.Plugin;
-import org.elasticsearch.test.ESIntegTestCase;
-import org.elasticsearch.xpack.core.XPackClientPlugin;
+import org.elasticsearch.test.rest.ESRestTestCase;
 import org.elasticsearch.xpack.core.security.authc.support.UsernamePasswordToken;
-import org.elasticsearch.xpack.core.security.client.SecurityClient;
 
-import java.util.Collection;
+import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 
 import static org.elasticsearch.example.role.CustomInMemoryRolesProvider.INDEX;
 import static org.elasticsearch.example.role.CustomInMemoryRolesProvider.ROLE_A;
@@ -31,34 +33,38 @@ import static org.hamcrest.Matchers.is;
 /**
  * Integration test for custom roles providers.
  */
-public class CustomRolesProviderIT extends ESIntegTestCase {
-
+public class CustomRolesProviderIT extends ESRestTestCase {
     private static final String TEST_USER = "test_user";
     private static final String TEST_PWD = "change_me";
 
+    private static final RequestOptions AUTH_OPTIONS;
+    static {
+        RequestOptions.Builder options = RequestOptions.DEFAULT.toBuilder();
+        options.addHeader(UsernamePasswordToken.BASIC_AUTH_HEADER,
+                basicAuthHeaderValue(TEST_USER, new SecureString(TEST_PWD.toCharArray())));
+        AUTH_OPTIONS = options.build();
+    }
+
     @Override
-    protected Settings externalClusterClientSettings() {
+    protected Settings restClientSettings() {
         return Settings.builder()
-                    .put(ThreadContext.PREFIX + "." + CustomRealm.USER_HEADER, CustomRealm.KNOWN_USER)
-                    .put(ThreadContext.PREFIX + "." + CustomRealm.PW_HEADER, CustomRealm.KNOWN_PW.toString())
-                    .put(NetworkModule.TRANSPORT_TYPE_KEY, "security4")
-                    .build();
+            .put(ThreadContext.PREFIX + "." + CustomRealm.USER_HEADER, CustomRealm.KNOWN_USER)
+            .put(ThreadContext.PREFIX + "." + CustomRealm.PW_HEADER, CustomRealm.KNOWN_PW.toString())
+            .build();
     }
 
-    @Override
-    protected Collection<Class<? extends Plugin>> transportClientPlugins() {
-        return Collections.singleton(XPackClientPlugin.class);
-    }
-
-    public void setupTestUser(String role) {
-        SecurityClient securityClient = new SecurityClient(client());
-        securityClient.preparePutUser(TEST_USER, TEST_PWD.toCharArray(), role).get();
+    public void setupTestUser(String role) throws IOException {
+        new TestRestHighLevelClient().security().putUser(
+            PutUserRequest.withPassword(new User(TEST_USER, List.of(role)), TEST_PWD.toCharArray(), true, RefreshPolicy.IMMEDIATE),
+            RequestOptions.DEFAULT);
     }
 
     public void testAuthorizedCustomRoleSucceeds() throws Exception {
         setupTestUser(ROLE_B);
         // roleB has all permissions on index "foo", so creating "foo" should succeed
-        Response response = getRestClient().performRequest("PUT", "/" + INDEX, authHeader());
+        Request request = new Request("PUT", "/" + INDEX);
+        request.setOptions(AUTH_OPTIONS);
+        Response response = client().performRequest(request);
         assertThat(response.getStatusLine().getStatusCode(), is(200));
     }
 
@@ -68,28 +74,23 @@ public class CustomRolesProviderIT extends ESIntegTestCase {
         // the first custom role provider appears first in order, it should take precedence and deny
         // permission to create the index
         setupTestUser(ROLE_A);
-        // roleB has all permissions on index "foo", so creating "foo" should succeed
-        try {
-            getRestClient().performRequest("PUT", "/" + INDEX, authHeader());
-            fail(ROLE_A + " should not be authorized to create index " + INDEX);
-        } catch (ResponseException e) {
-            assertThat(e.getResponse().getStatusLine().getStatusCode(), is(403));
-        }
+        Request request = new Request("PUT", "/" + INDEX);
+        request.setOptions(AUTH_OPTIONS);
+        ResponseException e = expectThrows(ResponseException.class, () -> client().performRequest(request));
+        assertThat(e.getResponse().getStatusLine().getStatusCode(), is(403));
     }
 
     public void testUnresolvedRoleDoesntSucceed() throws Exception {
         setupTestUser("unknown");
-        // roleB has all permissions on index "foo", so creating "foo" should succeed
-        try {
-            getRestClient().performRequest("PUT", "/" + INDEX, authHeader());
-            fail(ROLE_A + " should not be authorized to create index " + INDEX);
-        } catch (ResponseException e) {
-            assertThat(e.getResponse().getStatusLine().getStatusCode(), is(403));
-        }
+        Request request = new Request("PUT", "/" + INDEX);
+        request.setOptions(AUTH_OPTIONS);
+        ResponseException e = expectThrows(ResponseException.class, () -> client().performRequest(request));
+        assertThat(e.getResponse().getStatusLine().getStatusCode(), is(403));
     }
 
-    private BasicHeader authHeader() {
-        return new BasicHeader(UsernamePasswordToken.BASIC_AUTH_HEADER,
-                               basicAuthHeaderValue(TEST_USER, new SecureString(TEST_PWD.toCharArray())));
+    private class TestRestHighLevelClient extends RestHighLevelClient {
+        TestRestHighLevelClient() {
+            super(client(), restClient -> {}, Collections.emptyList());
+        }
     }
 }

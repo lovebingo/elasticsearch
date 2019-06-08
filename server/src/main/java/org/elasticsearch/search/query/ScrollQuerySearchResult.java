@@ -26,13 +26,15 @@ import org.elasticsearch.search.SearchShardTarget;
 
 import java.io.IOException;
 
-import static org.elasticsearch.search.query.QuerySearchResult.readQuerySearchResult;
-
 public final class ScrollQuerySearchResult extends SearchPhaseResult {
 
-    private QuerySearchResult result;
+    private final QuerySearchResult result;
 
-    public ScrollQuerySearchResult() {
+    public ScrollQuerySearchResult(StreamInput in) throws IOException {
+        super(in);
+        SearchShardTarget shardTarget = new SearchShardTarget(in);
+        result = new QuerySearchResult(in);
+        setSearchShardTarget(shardTarget);
     }
 
     public ScrollQuerySearchResult(QuerySearchResult result, SearchShardTarget shardTarget) {
@@ -55,14 +57,6 @@ public final class ScrollQuerySearchResult extends SearchPhaseResult {
     @Override
     public QuerySearchResult queryResult() {
         return result;
-    }
-
-    @Override
-    public void readFrom(StreamInput in) throws IOException {
-        super.readFrom(in);
-        SearchShardTarget shardTarget = new SearchShardTarget(in);
-        result = readQuerySearchResult(in);
-        setSearchShardTarget(shardTarget);
     }
 
     @Override

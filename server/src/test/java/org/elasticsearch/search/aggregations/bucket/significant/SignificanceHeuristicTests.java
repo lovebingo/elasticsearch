@@ -20,7 +20,7 @@ package org.elasticsearch.search.aggregations.bucket.significant;
 
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.Version;
-import org.elasticsearch.common.ParsingException;
+import org.elasticsearch.action.OriginalIndices;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.InputStreamStreamInput;
 import org.elasticsearch.common.io.stream.NamedWriteableAwareStreamInput;
@@ -34,7 +34,7 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentParseException;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.json.JsonXContent;
-import org.elasticsearch.index.Index;
+import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.search.DocValueFormat;
 import org.elasticsearch.search.SearchModule;
 import org.elasticsearch.search.SearchShardTarget;
@@ -88,7 +88,8 @@ public class SignificanceHeuristicTests extends ESTestCase {
 
         @Override
         public SearchShardTarget shardTarget() {
-            return new SearchShardTarget("no node, this is a unit test", new Index("no index, this is a unit test", "_na_"), 0, null);
+            return new SearchShardTarget("no node, this is a unit test", new ShardId("no index, this is a unit test", "_na_", 0),
+                null, OriginalIndices.NONE);
         }
     }
 
@@ -106,7 +107,7 @@ public class SignificanceHeuristicTests extends ESTestCase {
         // read
         ByteArrayInputStream inBuffer = new ByteArrayInputStream(outBuffer.toByteArray());
         StreamInput in = new InputStreamStreamInput(inBuffer);
-        SearchModule searchModule = new SearchModule(Settings.EMPTY, false, emptyList()); // populates the registry through side effects
+        SearchModule searchModule = new SearchModule(Settings.EMPTY, emptyList()); // populates the registry through side effects
         NamedWriteableRegistry registry = new NamedWriteableRegistry(searchModule.getNamedWriteables());
         in = new NamedWriteableAwareStreamInput(in, registry);
         in.setVersion(version);
@@ -217,7 +218,7 @@ public class SignificanceHeuristicTests extends ESTestCase {
     // 1. The output of the builders can actually be parsed
     // 2. The parser does not swallow parameters after a significance heuristic was defined
     public void testBuilderAndParser() throws Exception {
-        SearchModule searchModule = new SearchModule(Settings.EMPTY, false, emptyList());
+        SearchModule searchModule = new SearchModule(Settings.EMPTY, emptyList());
         ParseFieldRegistry<SignificanceHeuristicParser> heuristicParserMapper = searchModule.getSignificanceHeuristicParserRegistry();
 
         // test jlh with string
@@ -265,9 +266,8 @@ public class SignificanceHeuristicTests extends ESTestCase {
     protected void checkParseException(ParseFieldRegistry<SignificanceHeuristicParser> significanceHeuristicParserRegistry,
             String faultyHeuristicDefinition, String expectedError) throws IOException {
 
-        try {
-            XContentParser stParser = createParser(JsonXContent.jsonXContent,
-                    "{\"field\":\"text\", " + faultyHeuristicDefinition + ",\"min_doc_count\":200}");
+        try (XContentParser stParser = createParser(JsonXContent.jsonXContent,
+                    "{\"field\":\"text\", " + faultyHeuristicDefinition + ",\"min_doc_count\":200}")) {
             stParser.nextToken();
             SignificantTermsAggregationBuilder.getParser(significanceHeuristicParserRegistry).parse("testagg", stParser);
             fail();
@@ -302,9 +302,10 @@ public class SignificanceHeuristicTests extends ESTestCase {
 
     protected SignificanceHeuristic parseFromString(ParseFieldRegistry<SignificanceHeuristicParser> significanceHeuristicParserRegistry,
             String heuristicString) throws IOException {
-        XContentParser stParser = createParser(JsonXContent.jsonXContent,
-                "{\"field\":\"text\", " + heuristicString + ", \"min_doc_count\":200}");
-        return parseSignificanceHeuristic(significanceHeuristicParserRegistry, stParser);
+        try (XContentParser stParser = createParser(JsonXContent.jsonXContent,
+                "{\"field\":\"text\", " + heuristicString + ", \"min_doc_count\":200}")) {
+            return parseSignificanceHeuristic(significanceHeuristicParserRegistry, stParser);
+        }
     }
 
     void testBackgroundAssertions(SignificanceHeuristic heuristicIsSuperset, SignificanceHeuristic heuristicNotSuperset) {

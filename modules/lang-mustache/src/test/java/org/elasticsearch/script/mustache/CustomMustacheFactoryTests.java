@@ -19,7 +19,6 @@
 
 package org.elasticsearch.script.mustache;
 
-import org.elasticsearch.script.ExecutableScript;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptEngine;
 import org.elasticsearch.script.TemplateScript;
@@ -38,14 +37,22 @@ import static org.hamcrest.Matchers.instanceOf;
 public class CustomMustacheFactoryTests extends ESTestCase {
 
     public void testCreateEncoder() {
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> CustomMustacheFactory.createEncoder(null));
-        assertThat(e.getMessage(), equalTo("No encoder found for MIME type [null]"));
+        {
+            final IllegalArgumentException e =
+                    expectThrows(IllegalArgumentException.class, () -> CustomMustacheFactory.createEncoder("non-existent"));
+            assertThat(e.getMessage(), equalTo("No encoder found for MIME type [non-existent]"));
+        }
 
-        e = expectThrows(IllegalArgumentException.class, () -> CustomMustacheFactory.createEncoder(""));
-        assertThat(e.getMessage(), equalTo("No encoder found for MIME type []"));
+        {
+            final IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> CustomMustacheFactory.createEncoder(""));
+            assertThat(e.getMessage(), equalTo("No encoder found for MIME type []"));
+        }
 
-        e = expectThrows(IllegalArgumentException.class, () -> CustomMustacheFactory.createEncoder("test"));
-        assertThat(e.getMessage(), equalTo("No encoder found for MIME type [test]"));
+        {
+            final IllegalArgumentException e =
+                    expectThrows(IllegalArgumentException.class, () -> CustomMustacheFactory.createEncoder("test"));
+            assertThat(e.getMessage(), equalTo("No encoder found for MIME type [test]"));
+        }
 
         assertThat(CustomMustacheFactory.createEncoder(CustomMustacheFactory.JSON_MIME_TYPE_WITH_CHARSET),
             instanceOf(CustomMustacheFactory.JsonEscapeEncoder.class));

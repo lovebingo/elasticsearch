@@ -39,6 +39,7 @@ import org.elasticsearch.xpack.core.ssl.SSLService;
 import org.elasticsearch.xpack.monitoring.action.TransportMonitoringBulkAction;
 import org.elasticsearch.xpack.monitoring.cleaner.CleanerService;
 import org.elasticsearch.xpack.monitoring.collector.Collector;
+import org.elasticsearch.xpack.monitoring.collector.ccr.StatsCollector;
 import org.elasticsearch.xpack.monitoring.collector.cluster.ClusterStatsCollector;
 import org.elasticsearch.xpack.monitoring.collector.indices.IndexRecoveryCollector;
 import org.elasticsearch.xpack.monitoring.collector.indices.IndexStatsCollector;
@@ -66,27 +67,20 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.elasticsearch.common.settings.Setting.boolSetting;
 
-/**
- * This class activates/deactivates the monitoring modules depending if we're running a node client, transport client:
- * - node clients: all modules are bound
- * - transport clients: only action/transport actions are bound
- */
 public class Monitoring extends Plugin implements ActionPlugin {
 
     /**
      * The ability to automatically cleanup ".watcher_history*" indices while also cleaning up Monitoring indices.
      */
+    @Deprecated
     public static final Setting<Boolean> CLEAN_WATCHER_HISTORY = boolSetting("xpack.watcher.history.cleaner_service.enabled",
-                                                                             true,
-                                                                             Setting.Property.Dynamic, Setting.Property.NodeScope);
+        true, Setting.Property.Dynamic, Setting.Property.NodeScope, Setting.Property.Deprecated);
 
     protected final Settings settings;
     private final boolean enabled;
-    private final boolean transportClientMode;
 
     public Monitoring(Settings settings) {
         this.settings = settings;
-        this.transportClientMode = XPackPlugin.transportClientMode(settings);
         this.enabled = XPackSettings.MONITORING_ENABLED.get(settings);
     }
 
@@ -99,16 +93,12 @@ public class Monitoring extends Plugin implements ActionPlugin {
         return enabled;
     }
 
-    boolean isTransportClient() {
-        return transportClientMode;
-    }
-
     @Override
     public Collection<Module> createGuiceModules() {
         List<Module> modules = new ArrayList<>();
         modules.add(b -> {
             XPackPlugin.bindFeatureSet(b, MonitoringFeatureSet.class);
-            if (transportClientMode || enabled == false) {
+            if (enabled == false) {
                 b.bind(MonitoringService.class).toProvider(Providers.of(null));
                 b.bind(Exporters.class).toProvider(Providers.of(null));
             }
@@ -136,12 +126,13 @@ public class Monitoring extends Plugin implements ActionPlugin {
             threadPool.getThreadContext());
 
         Set<Collector> collectors = new HashSet<>();
-        collectors.add(new IndexStatsCollector(settings, clusterService, getLicenseState(), client));
+        collectors.add(new IndexStatsCollector(clusterService, getLicenseState(), client));
         collectors.add(new ClusterStatsCollector(settings, clusterService, getLicenseState(), client, getLicenseService()));
-        collectors.add(new ShardsCollector(settings, clusterService, getLicenseState()));
-        collectors.add(new NodeStatsCollector(settings, clusterService, getLicenseState(), client));
-        collectors.add(new IndexRecoveryCollector(settings, clusterService, getLicenseState(), client));
+        collectors.add(new ShardsCollector(clusterService, getLicenseState()));
+        collectors.add(new NodeStatsCollector(clusterService, getLicenseState(), client));
+        collectors.add(new IndexRecoveryCollector(clusterService, getLicenseState(), client));
         collectors.add(new JobStatsCollector(settings, clusterService, getLicenseState(), client));
+        collectors.add(new StatsCollector(settings, clusterService, getLicenseState(), client));
 
         final MonitoringService monitoringService = new MonitoringService(settings, clusterService, threadPool, collectors, exporters);
 
@@ -172,6 +163,7 @@ public class Monitoring extends Plugin implements ActionPlugin {
         settings.add(MonitoringField.HISTORY_DURATION);
         settings.add(CLEAN_WATCHER_HISTORY);
         settings.add(MonitoringService.ENABLED);
+        settings.add(MonitoringService.ELASTICSEARCH_COLLECTION_ENABLED);
         settings.add(MonitoringService.INTERVAL);
         settings.add(Collector.INDICES);
         settings.add(ClusterStatsCollector.CLUSTER_STATS_TIMEOUT);
@@ -179,6 +171,7 @@ public class Monitoring extends Plugin implements ActionPlugin {
         settings.add(IndexRecoveryCollector.INDEX_RECOVERY_ACTIVE_ONLY);
         settings.add(IndexStatsCollector.INDEX_STATS_TIMEOUT);
         settings.add(JobStatsCollector.JOB_STATS_TIMEOUT);
+        settings.add(StatsCollector.CCR_STATS_TIMEOUT);
         settings.add(NodeStatsCollector.NODE_STATS_TIMEOUT);
         settings.addAll(Exporters.getSettings());
         return Collections.unmodifiableList(settings);
@@ -187,6 +180,6 @@ public class Monitoring extends Plugin implements ActionPlugin {
     @Override
     public List<String> getSettingsFilter() {
         final String exportersKey = "xpack.monitoring.exporters.";
-        return Collections.unmodifiableList(Arrays.asList(exportersKey + "*.auth.*", exportersKey + "*.ssl.*"));
+        return List.of(exportersKey + "*.auth.*", exportersKey + "*.ssl.*");
     }
 }

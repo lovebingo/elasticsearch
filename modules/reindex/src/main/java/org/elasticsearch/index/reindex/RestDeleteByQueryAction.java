@@ -19,7 +19,6 @@
 
 package org.elasticsearch.index.reindex;
 
-import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.client.node.NodeClient;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.rest.RestController;
@@ -36,7 +35,6 @@ public class RestDeleteByQueryAction extends AbstractBulkByQueryRestHandler<Dele
     public RestDeleteByQueryAction(Settings settings, RestController controller) {
         super(settings, DeleteByQueryAction.INSTANCE);
         controller.registerHandler(POST, "/{index}/_delete_by_query", this);
-        controller.registerHandler(POST, "/{index}/{type}/_delete_by_query", this);
     }
 
     @Override
@@ -56,10 +54,11 @@ public class RestDeleteByQueryAction extends AbstractBulkByQueryRestHandler<Dele
          * it to set its own defaults which differ from SearchRequest's
          * defaults. Then the parseInternalRequest can override them.
          */
-        DeleteByQueryRequest internal = new DeleteByQueryRequest(new SearchRequest());
+        DeleteByQueryRequest internal = new DeleteByQueryRequest();
 
         Map<String, Consumer<Object>> consumers = new HashMap<>();
         consumers.put("conflicts", o -> internal.setConflicts((String) o));
+        consumers.put("max_docs", s -> setMaxDocsValidateIdentical(internal, ((Number) s).intValue()));
 
         parseInternalRequest(internal, request, consumers);
 

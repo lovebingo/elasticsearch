@@ -33,11 +33,13 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.unit.TimeValue;
 
 import java.io.IOException;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 public class ClusterHealthRequest extends MasterNodeReadRequest<ClusterHealthRequest> implements IndicesRequest.Replaceable {
 
     private String[] indices;
+    private IndicesOptions indicesOptions = IndicesOptions.lenientExpand();
     private TimeValue timeout = new TimeValue(30, TimeUnit.SECONDS);
     private ClusterHealthStatus waitForStatus;
     private boolean waitForNoRelocatingShards = false;
@@ -45,6 +47,11 @@ public class ClusterHealthRequest extends MasterNodeReadRequest<ClusterHealthReq
     private ActiveShardCount waitForActiveShards = ActiveShardCount.NONE;
     private String waitForNodes = "";
     private Priority waitForEvents = null;
+    /**
+     * Only used by the high-level REST Client. Controls the details level of the health information returned.
+     * The default value is 'cluster'.
+     */
+    private Level level = Level.CLUSTER;
 
     public ClusterHealthRequest() {
     }
@@ -74,8 +81,11 @@ public class ClusterHealthRequest extends MasterNodeReadRequest<ClusterHealthReq
         if (in.readBoolean()) {
             waitForEvents = Priority.readFrom(in);
         }
-        if (in.getVersion().onOrAfter(Version.V_6_2_0)) {
-            waitForNoInitializingShards = in.readBoolean();
+        waitForNoInitializingShards = in.readBoolean();
+        if (in.getVersion().onOrAfter(Version.V_7_2_0)) {
+            indicesOptions = IndicesOptions.readIndicesOptions(in);
+        } else {
+            indicesOptions = IndicesOptions.lenientExpandOpen();
         }
     }
 
@@ -106,8 +116,9 @@ public class ClusterHealthRequest extends MasterNodeReadRequest<ClusterHealthReq
             out.writeBoolean(true);
             Priority.writeTo(waitForEvents, out);
         }
-        if (out.getVersion().onOrAfter(Version.V_6_2_0)) {
-            out.writeBoolean(waitForNoInitializingShards);
+        out.writeBoolean(waitForNoInitializingShards);
+        if (out.getVersion().onOrAfter(Version.V_7_2_0)) {
+            indicesOptions.writeIndicesOptions(out);
         }
     }
 
@@ -124,7 +135,12 @@ public class ClusterHealthRequest extends MasterNodeReadRequest<ClusterHealthReq
 
     @Override
     public IndicesOptions indicesOptions() {
-        return IndicesOptions.lenientExpandOpen();
+        return indicesOptions;
+    }
+
+    public ClusterHealthRequest indicesOptions(final IndicesOptions indicesOptions) {
+        this.indicesOptions = indicesOptions;
+        return this;
     }
 
     public TimeValue timeout() {
@@ -242,6 +258,22 @@ public class ClusterHealthRequest extends MasterNodeReadRequest<ClusterHealthReq
         return this.waitForEvents;
     }
 
+    /**
+     * Set the level of detail for the health information to be returned.
+     * Only used by the high-level REST Client.
+     */
+    public void level(Level level) {
+        this.level = Objects.requireNonNull(level, "level must not be null");
+    }
+
+    /**
+     * Get the level of detail for the health information to be returned.
+     * Only used by the high-level REST Client.
+     */
+    public Level level() {
+        return level;
+    }
+
     @Override
     public ActionRequestValidationException validate() {
         return null;
@@ -250,5 +282,9 @@ public class ClusterHealthRequest extends MasterNodeReadRequest<ClusterHealthReq
     @Override
     public void readFrom(StreamInput in) throws IOException {
         throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
+    }
+
+    public enum Level {
+        CLUSTER, INDICES, SHARDS
     }
 }

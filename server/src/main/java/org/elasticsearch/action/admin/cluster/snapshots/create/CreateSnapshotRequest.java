@@ -19,30 +19,36 @@
 
 package org.elasticsearch.action.admin.cluster.snapshots.create;
 
+import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchGenerationException;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.IndicesRequest;
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.action.support.master.MasterNodeRequest;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.xcontent.ToXContentObject;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentType;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 import static org.elasticsearch.common.Strings.EMPTY_ARRAY;
+import static org.elasticsearch.common.settings.Settings.Builder.EMPTY_SETTINGS;
 import static org.elasticsearch.common.settings.Settings.readSettingsFromStream;
 import static org.elasticsearch.common.settings.Settings.writeSettingsToStream;
-import static org.elasticsearch.common.settings.Settings.Builder.EMPTY_SETTINGS;
 import static org.elasticsearch.common.xcontent.support.XContentMapValues.nodeBooleanValue;
+import static org.elasticsearch.snapshots.SnapshotInfo.METADATA_FIELD_INTRODUCED;
 
 /**
  * Create snapshot request
@@ -58,7 +64,9 @@ import static org.elasticsearch.common.xcontent.support.XContentMapValues.nodeBo
  * <li>must not contain invalid file name characters {@link org.elasticsearch.common.Strings#INVALID_FILENAME_CHARS} </li>
  * </ul>
  */
-public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotRequest> implements IndicesRequest.Replaceable {
+public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotRequest>
+        implements IndicesRequest.Replaceable, ToXContentObject {
+    public static int MAXIMUM_METADATA_BYTES = 1024; // chosen arbitrarily
 
     private String snapshot;
 
@@ -66,7 +74,7 @@ public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotReque
 
     private String[] indices = EMPTY_ARRAY;
 
-    private IndicesOptions indicesOptions = IndicesOptions.strictExpandOpen();
+    private IndicesOptions indicesOptions = IndicesOptions.strictExpand();
 
     private boolean partial = false;
 
@@ -75,6 +83,8 @@ public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotReque
     private boolean includeGlobalState = true;
 
     private boolean waitForCompletion;
+
+    private Map<String, Object> userMetadata;
 
     public CreateSnapshotRequest() {
     }
@@ -100,6 +110,9 @@ public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotReque
         includeGlobalState = in.readBoolean();
         waitForCompletion = in.readBoolean();
         partial = in.readBoolean();
+        if (in.getVersion().onOrAfter(METADATA_FIELD_INTRODUCED)) {
+            userMetadata = in.readMap();
+        }
     }
 
     @Override
@@ -113,6 +126,9 @@ public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotReque
         out.writeBoolean(includeGlobalState);
         out.writeBoolean(waitForCompletion);
         out.writeBoolean(partial);
+        if (out.getVersion().onOrAfter(METADATA_FIELD_INTRODUCED)) {
+            out.writeMap(userMetadata);
+        }
     }
 
     @Override
@@ -140,7 +156,26 @@ public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotReque
         if (settings == null) {
             validationException = addValidationError("settings is null", validationException);
         }
+        final int metadataSize = metadataSize(userMetadata);
+        if (metadataSize > MAXIMUM_METADATA_BYTES) {
+            validationException = addValidationError("metadata must be smaller than 1024 bytes, but was [" + metadataSize + "]",
+                validationException);
+        }
         return validationException;
+    }
+
+    private static int metadataSize(Map<String, Object> userMetadata) {
+        if (userMetadata == null) {
+            return 0;
+        }
+        try (XContentBuilder builder = XContentFactory.jsonBuilder()) {
+            builder.value(userMetadata);
+            int size = BytesReference.bytes(builder).length();
+            return size;
+        } catch (IOException e) {
+            // This should not be possible as we are just rendering the xcontent in memory
+            throw new ElasticsearchException(e);
+        }
     }
 
     /**
@@ -374,6 +409,15 @@ public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotReque
         return includeGlobalState;
     }
 
+    public Map<String, Object> userMetadata() {
+        return userMetadata;
+    }
+
+    public CreateSnapshotRequest userMetadata(Map<String, Object> userMetadata) {
+        this.userMetadata = userMetadata;
+        return this;
+    }
+
     /**
      * Parses snapshot definition.
      *
@@ -401,10 +445,42 @@ public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotReque
                 settings((Map<String, Object>) entry.getValue());
             } else if (name.equals("include_global_state")) {
                 includeGlobalState = nodeBooleanValue(entry.getValue(), "include_global_state");
+            } else if (name.equals("metadata")) {
+                if (entry.getValue() != null && (entry.getValue() instanceof Map == false)) {
+                    throw new IllegalArgumentException("malformed metadata, should be an object");
+                }
+                userMetadata((Map<String, Object>) entry.getValue());
             }
         }
         indicesOptions(IndicesOptions.fromMap(source, indicesOptions));
         return this;
+    }
+
+    @Override
+    public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+        builder.startObject();
+        builder.field("repository", repository);
+        builder.field("snapshot", snapshot);
+        builder.startArray("indices");
+        for (String index : indices) {
+            builder.value(index);
+        }
+        builder.endArray();
+        builder.field("partial", partial);
+        if (settings != null) {
+            builder.startObject("settings");
+            if (settings.isEmpty() == false) {
+                settings.toXContent(builder, params);
+            }
+            builder.endObject();
+        }
+        builder.field("include_global_state", includeGlobalState);
+        if (indicesOptions != null) {
+            indicesOptions.toXContent(builder, params);
+        }
+        builder.field("metadata", userMetadata);
+        builder.endObject();
+        return builder;
     }
 
     @Override
@@ -415,5 +491,46 @@ public class CreateSnapshotRequest extends MasterNodeRequest<CreateSnapshotReque
     @Override
     public String getDescription() {
         return "snapshot [" + repository + ":" + snapshot + "]";
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        CreateSnapshotRequest that = (CreateSnapshotRequest) o;
+        return partial == that.partial &&
+            includeGlobalState == that.includeGlobalState &&
+            waitForCompletion == that.waitForCompletion &&
+            Objects.equals(snapshot, that.snapshot) &&
+            Objects.equals(repository, that.repository) &&
+            Arrays.equals(indices, that.indices) &&
+            Objects.equals(indicesOptions, that.indicesOptions) &&
+            Objects.equals(settings, that.settings) &&
+            Objects.equals(masterNodeTimeout, that.masterNodeTimeout) &&
+            Objects.equals(userMetadata, that.userMetadata);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(snapshot, repository, indicesOptions, partial, settings, includeGlobalState,
+            waitForCompletion, userMetadata);
+        result = 31 * result + Arrays.hashCode(indices);
+        return result;
+    }
+
+    @Override
+    public String toString() {
+        return "CreateSnapshotRequest{" +
+            "snapshot='" + snapshot + '\'' +
+            ", repository='" + repository + '\'' +
+            ", indices=" + (indices == null ? null : Arrays.asList(indices)) +
+            ", indicesOptions=" + indicesOptions +
+            ", partial=" + partial +
+            ", settings=" + settings +
+            ", includeGlobalState=" + includeGlobalState +
+            ", waitForCompletion=" + waitForCompletion +
+            ", masterNodeTimeout=" + masterNodeTimeout +
+            ", metadata=" + userMetadata +
+            '}';
     }
 }

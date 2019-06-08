@@ -3,8 +3,20 @@
     "documentation": "http://www.elastic.co/guide/en/elasticsearch/reference/master/docs-index_.html",
     "methods": ["POST", "PUT"],
     "url": {
-      "path": "/{index}/{type}",
-      "paths": ["/{index}/{type}", "/{index}/{type}/{id}", "/{index}/_doc/{id}", "/{index}/_doc"],
+      "path": "/{index}/_doc",
+      "paths": ["/{index}/_doc/{id}", "/{index}/_doc"],
+      "deprecated_paths" : [
+        {
+          "version" : "7.0.0",
+          "path" : "/{index}/{type}",
+          "description" : "Specifying types in urls has been deprecated"
+        },
+        {
+          "version" : "7.0.0",
+          "path" : "/{index}/{type}/{id}",
+          "description" : "Specifying types in urls has been deprecated"
+        }
+      ],
       "parts": {
         "id": {
           "type" : "string",
@@ -21,10 +33,6 @@
         }
       },
       "params": {
-        "include_type_name": {
-          "type" : "string",
-          "description" : "Whether to add the type name to the response"
-        },
         "wait_for_active_shards": {
           "type" : "string",
           "description" : "Sets the number of shard copies that must be active before proceeding with the index operation. Defaults to 1, meaning the primary shard only. Set to `all` for all shard copies, otherwise set to any non-negative value less than or equal to the total number of copies for the shard (number of replicas + 1)"
@@ -34,10 +42,6 @@
           "options" : ["index", "create"],
           "default" : "index",
           "description" : "Explicit operation type"
-        },
-        "parent": {
-          "type" : "string",
-          "description" : "ID of the parent document"
         },
         "refresh": {
           "type" : "enum",
@@ -60,6 +64,14 @@
           "type" : "enum",
           "options" : ["internal", "external", "external_gte", "force"],
           "description" : "Specific version type"
+        },
+        "if_seq_no" : {
+          "type" : "number",
+          "description" : "only perform the index operation if the last operation that has changed the document has the specified sequence number"
+        },
+        "if_primary_term" : {
+          "type" : "number",
+          "description" : "only perform the index operation if the last operation that has changed the document has the specified primary term"
         },
         "pipeline" : {
           "type" : "string",

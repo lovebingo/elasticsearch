@@ -5,9 +5,7 @@
  */
 package org.elasticsearch.xpack.security.transport.filter;
 
-import org.elasticsearch.client.Client;
 import org.elasticsearch.common.SuppressForbidden;
-import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.http.HttpServerTransport;
@@ -20,15 +18,14 @@ import org.junit.BeforeClass;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 import static org.hamcrest.Matchers.is;
 
-// no client nodes, no transport clients, as they all get rejected on network connections
-@ClusterScope(scope = Scope.SUITE, numDataNodes = 0, numClientNodes = 0, transportClientRatio = 0.0)
+// no client nodes as they all get rejected on network connections
+@ClusterScope(scope = Scope.SUITE, numDataNodes = 0, numClientNodes = 0)
 public class IpFilteringIntegrationTests extends SecurityIntegTestCase {
     private static int randomClientPort;
 
@@ -63,14 +60,9 @@ public class IpFilteringIntegrationTests extends SecurityIntegTestCase {
         }
     }
 
-    public void testThatIpFilteringIsNotAppliedForDefaultTransport() throws Exception {
-        Client client = internalCluster().transportClient();
-        assertGreenClusterState(client);
-    }
-
     public void testThatIpFilteringIsAppliedForProfile() throws Exception {
         try (Socket socket = new Socket()){
-            trySocketConnection(socket, new InetSocketAddress(InetAddress.getLoopbackAddress(), getProfilePort("client")));
+            trySocketConnection(socket, getProfileAddress("client"));
             assertThat(socket.isClosed(), is(true));
         }
     }
@@ -87,9 +79,9 @@ public class IpFilteringIntegrationTests extends SecurityIntegTestCase {
         }
     }
 
-    private static int getProfilePort(String profile) {
+    private static InetSocketAddress getProfileAddress(String profile) {
         TransportAddress transportAddress =
                 randomFrom(internalCluster().getInstance(Transport.class).profileBoundAddresses().get(profile).boundAddresses());
-        return transportAddress.address().getPort();
+        return transportAddress.address();
     }
 }

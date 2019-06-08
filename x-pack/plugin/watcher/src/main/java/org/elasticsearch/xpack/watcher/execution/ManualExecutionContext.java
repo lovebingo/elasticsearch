@@ -5,7 +5,6 @@
  */
 package org.elasticsearch.xpack.watcher.execution;
 
-import org.elasticsearch.common.CheckedSupplier;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.xpack.core.watcher.actions.Action;
 import org.elasticsearch.xpack.core.watcher.actions.ActionWrapper;
@@ -16,9 +15,9 @@ import org.elasticsearch.xpack.core.watcher.execution.WatchExecutionContext;
 import org.elasticsearch.xpack.core.watcher.input.Input;
 import org.elasticsearch.xpack.core.watcher.watch.Watch;
 import org.elasticsearch.xpack.watcher.trigger.manual.ManualTriggerEvent;
-import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
 
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -29,18 +28,19 @@ public class ManualExecutionContext extends WatchExecutionContext {
     private final Map<String, ActionExecutionMode> actionModes;
     private final boolean recordExecution;
     private final boolean knownWatch;
-    private final Watch watch;
 
-    ManualExecutionContext(Watch watch, boolean knownWatch, DateTime executionTime, ManualTriggerEvent triggerEvent,
+    ManualExecutionContext(Watch watch, boolean knownWatch, ZonedDateTime executionTime, ManualTriggerEvent triggerEvent,
                            TimeValue defaultThrottlePeriod, Input.Result inputResult, Condition.Result conditionResult,
-                           Map<String, ActionExecutionMode> actionModes, boolean recordExecution) {
+                           Map<String, ActionExecutionMode> actionModes, boolean recordExecution) throws Exception {
 
         super(watch.id(), executionTime, triggerEvent, defaultThrottlePeriod);
 
         this.actionModes = actionModes;
         this.recordExecution = recordExecution;
         this.knownWatch = knownWatch;
-        this.watch = watch;
+
+        // set the watch early to ensure calls to watch() below succeed.
+        super.ensureWatchExists(() -> watch);
 
         if (inputResult != null) {
             onInputResult(inputResult);
@@ -64,12 +64,6 @@ public class ManualExecutionContext extends WatchExecutionContext {
                 }
             }
         }
-    }
-
-    // a noop operation, as the watch is already loaded via ctor
-    @Override
-    public void ensureWatchExists(CheckedSupplier<Watch, Exception> supplier) throws Exception {
-        super.ensureWatchExists(() -> watch);
     }
 
     @Override
@@ -107,11 +101,6 @@ public class ManualExecutionContext extends WatchExecutionContext {
         return recordExecution;
     }
 
-    @Override
-    public Watch watch() {
-        return watch;
-    }
-
     public static Builder builder(Watch watch, boolean knownWatch, ManualTriggerEvent event, TimeValue defaultThrottlePeriod) {
         return new Builder(watch, knownWatch, event, defaultThrottlePeriod);
     }
@@ -124,7 +113,7 @@ public class ManualExecutionContext extends WatchExecutionContext {
         private final boolean knownWatch;
         private final ManualTriggerEvent triggerEvent;
         private final TimeValue defaultThrottlePeriod;
-        protected DateTime executionTime;
+        protected ZonedDateTime executionTime;
         private boolean recordExecution = false;
         private Map<String, ActionExecutionMode> actionModes = new HashMap<>();
         private Input.Result inputResult;
@@ -138,7 +127,7 @@ public class ManualExecutionContext extends WatchExecutionContext {
             this.defaultThrottlePeriod = defaultThrottlePeriod;
         }
 
-        public Builder executionTime(DateTime executionTime) {
+        public Builder executionTime(ZonedDateTime executionTime) {
             this.executionTime = executionTime;
             return this;
         }
@@ -173,9 +162,9 @@ public class ManualExecutionContext extends WatchExecutionContext {
             return this;
         }
 
-        public ManualExecutionContext build() {
+        public ManualExecutionContext build() throws Exception {
             if (executionTime == null) {
-                executionTime = DateTime.now(DateTimeZone.UTC);
+                executionTime = ZonedDateTime.now(ZoneOffset.UTC);
             }
             ManualExecutionContext context = new ManualExecutionContext(watch, knownWatch, executionTime, triggerEvent,
                     defaultThrottlePeriod, inputResult, conditionResult, unmodifiableMap(actionModes), recordExecution);

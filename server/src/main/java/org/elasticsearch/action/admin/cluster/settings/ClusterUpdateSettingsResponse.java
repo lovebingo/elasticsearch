@@ -70,7 +70,6 @@ public class ClusterUpdateSettingsResponse extends AcknowledgedResponse {
         super.readFrom(in);
         transientSettings = Settings.readSettingsFromStream(in);
         persistentSettings = Settings.readSettingsFromStream(in);
-        readAcknowledged(in);
     }
 
     public Settings getTransientSettings() {
@@ -86,7 +85,6 @@ public class ClusterUpdateSettingsResponse extends AcknowledgedResponse {
         super.writeTo(out);
         Settings.writeSettingsToStream(transientSettings, out);
         Settings.writeSettingsToStream(persistentSettings, out);
-        writeAcknowledged(out);
     }
 
     @Override

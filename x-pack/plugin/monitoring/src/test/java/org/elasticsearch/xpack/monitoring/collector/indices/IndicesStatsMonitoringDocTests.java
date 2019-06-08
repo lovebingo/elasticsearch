@@ -45,12 +45,12 @@ public class IndicesStatsMonitoringDocTests extends BaseFilteredMonitoringDocTes
     @Before
     public void setUp() throws Exception {
         super.setUp();
-        indicesStats = Collections.singletonList(new IndexStats("index-0", new ShardStats[] {
+        indicesStats = Collections.singletonList(new IndexStats("index-0", "dcvO5uZATE-EhIKc3tk9Bg", new ShardStats[] {
                 // Primaries
-                new ShardStats(mockShardRouting(true), mockShardPath(), mockCommonStats(), null, null),
-                new ShardStats(mockShardRouting(true), mockShardPath(), mockCommonStats(), null, null),
+                new ShardStats(mockShardRouting(true), mockShardPath(), mockCommonStats(), null, null, null),
+                new ShardStats(mockShardRouting(true), mockShardPath(), mockCommonStats(), null, null, null),
                 // Replica
-                new ShardStats(mockShardRouting(false), mockShardPath(), mockCommonStats(), null, null)
+                new ShardStats(mockShardRouting(false), mockShardPath(), mockCommonStats(), null, null, null)
         }));
     }
 

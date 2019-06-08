@@ -10,14 +10,13 @@
   - do:
       index:
         index:   source
-        type:    foo
         id:      1
         body:    { "text": "test" }
   - do:
       indices.refresh: {}
 
   - do:
-      catch: request
+      catch: bad_request
       reindex:
         body:
           source:

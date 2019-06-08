@@ -5,14 +5,14 @@
  */
 package org.elasticsearch.xpack.rollup;
 
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.ResourceNotFoundException;
 import org.elasticsearch.action.search.MultiSearchResponse;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.ShardSearchFailure;
-import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.TriFunction;
-import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.search.DocValueFormat;
 import org.elasticsearch.search.SearchHits;
@@ -28,26 +28,23 @@ import org.elasticsearch.search.aggregations.bucket.histogram.InternalDateHistog
 import org.elasticsearch.search.aggregations.bucket.histogram.InternalHistogram;
 import org.elasticsearch.search.aggregations.bucket.terms.LongTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.StringTerms;
+import org.elasticsearch.search.aggregations.metrics.InternalAvg;
+import org.elasticsearch.search.aggregations.metrics.InternalMax;
+import org.elasticsearch.search.aggregations.metrics.InternalMin;
 import org.elasticsearch.search.aggregations.metrics.InternalNumericMetricsAggregation.SingleValue;
-import org.elasticsearch.search.aggregations.metrics.avg.InternalAvg;
-import org.elasticsearch.search.aggregations.metrics.max.InternalMax;
-import org.elasticsearch.search.aggregations.metrics.min.InternalMin;
-import org.elasticsearch.search.aggregations.metrics.sum.InternalSum;
-import org.elasticsearch.search.aggregations.metrics.sum.SumAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.InternalSum;
+import org.elasticsearch.search.aggregations.metrics.SumAggregationBuilder;
 import org.elasticsearch.search.internal.InternalSearchResponse;
 import org.elasticsearch.xpack.core.rollup.RollupField;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 
@@ -59,15 +56,15 @@ import java.util.stream.Collectors;
  */
 public class RollupResponseTranslator {
 
-    private static final Logger logger = Loggers.getLogger(RollupResponseTranslator.class);
+    private static final Logger logger = LogManager.getLogger(RollupResponseTranslator.class);
 
     /**
      * Verifies a live-only search response.  Essentially just checks for failure then returns
      * the response since we have no work to do
      */
-    public static SearchResponse verifyResponse(MultiSearchResponse.Item normalResponse) {
+    public static SearchResponse verifyResponse(MultiSearchResponse.Item normalResponse) throws Exception {
         if (normalResponse.isFailure()) {
-            throw new RuntimeException(normalResponse.getFailureMessage(), normalResponse.getFailure());
+            throw normalResponse.getFailure();
         }
         return normalResponse.getResponse();
     }
@@ -81,16 +78,30 @@ public class RollupResponseTranslator {
      * on the translation conventions
      */
     public static SearchResponse translateResponse(MultiSearchResponse.Item[] rolledMsearch,
-                                                 InternalAggregation.ReduceContext reduceContext) {
+                                                 InternalAggregation.ReduceContext reduceContext) throws Exception {
 
-        List<SearchResponse> responses = Arrays.stream(rolledMsearch)
-                .map(item -> {
-                    if (item.isFailure()) {
-                        throw new RuntimeException(item.getFailureMessage(), item.getFailure());
-                    }
-                    return item.getResponse();
-                }).collect(Collectors.toList());
+        assert rolledMsearch.length > 0;
+        List<SearchResponse> responses = new ArrayList<>();
+        for (MultiSearchResponse.Item item : rolledMsearch) {
+            if (item.isFailure()) {
+                Exception e = item.getFailure();
 
+                // If an index was deleted after execution, give a hint to the user that this is a transient error
+                if (e instanceof IndexNotFoundException) {
+                    throw new ResourceNotFoundException("Index [" + ((IndexNotFoundException) e).getIndex().getName()
+                        + "] was not found, likely because it was deleted while the request was in-flight. " +
+                        "Rollup does not support partial search results, please try the request again.");
+                }
+
+                // Otherwise just throw
+                throw e;
+            }
+
+            // No error, add to responses
+            responses.add(item.getResponse());
+        }
+
+        assert responses.size() > 0;
         return doCombineResponse(null, responses, reduceContext);
     }
 
@@ -191,48 +202,45 @@ public class RollupResponseTranslator {
      * @param msearchResponses The responses from the msearch, where the first response is the live-index response
      */
     public static SearchResponse combineResponses(MultiSearchResponse.Item[] msearchResponses,
-                                                  InternalAggregation.ReduceContext reduceContext) {
-        boolean liveMissing = false;
+                                                  InternalAggregation.ReduceContext reduceContext) throws Exception {
+
         assert msearchResponses.length >= 2;
 
-        // The live response is always first
-        MultiSearchResponse.Item liveResponse = msearchResponses[0];
-        if (liveResponse.isFailure()) {
-            Exception e = liveResponse.getFailure();
-            // If we have a rollup response we can tolerate a missing live response
-            if (e instanceof IndexNotFoundException) {
-                logger.warn("\"Live\" index not found during rollup search.", e);
-                liveMissing = true;
-            } else {
-                throw new RuntimeException(liveResponse.getFailureMessage(), liveResponse.getFailure());
+        boolean first = true;
+        SearchResponse liveResponse = null;
+        List<SearchResponse> rolledResponses = new ArrayList<>();
+        for (MultiSearchResponse.Item item : msearchResponses) {
+            if (item.isFailure()) {
+                Exception e = item.getFailure();
+
+                // If an index was deleted after execution, give a hint to the user that this is a transient error
+                if (e instanceof IndexNotFoundException) {
+                    throw new ResourceNotFoundException("Index [" + ((IndexNotFoundException) e).getIndex() + "] was not found, " +
+                        "likely because it was deleted while the request was in-flight. Rollup does not support partial search results, " +
+                        "please try the request again.", e);
+                }
+
+                // Otherwise just throw
+                throw e;
             }
-        }
-        List<SearchResponse> rolledResponses = Arrays.stream(msearchResponses)
-                .skip(1)
-                .map(item -> {
-                    if (item.isFailure()) {
-                        Exception e = item.getFailure();
-                        // If we have a normal response we can tolerate a missing rollup response, although it theoretically
-                        // should be handled by a different code path (verifyResponse)
-                        if (e instanceof IndexNotFoundException) {
-                            logger.warn("Rollup index not found during rollup search.", e);
-                        } else {
-                            throw new RuntimeException(item.getFailureMessage(), item.getFailure());
-                        }
-                        return null;
-                    } else {
-                        return item.getResponse();
-                    }
-                }).filter(Objects::nonNull).collect(Collectors.toList());
 
-        // If we only have a live index left, process it directly
-        if (rolledResponses.isEmpty() && liveMissing == false) {
-            return verifyResponse(liveResponse);
-        } else if (rolledResponses.isEmpty() && liveMissing) {
-            throw new RuntimeException("No indices (live or rollup) found during rollup search");
+            // No error, add to responses
+            if (first) {
+                liveResponse = item.getResponse();
+            } else {
+                rolledResponses.add(item.getResponse());
+            }
+            first = false;
         }
 
-        return doCombineResponse(liveResponse.getResponse(), rolledResponses, reduceContext);
+        // If we only have a live index left, just return it directly.  We know it can't be an error already
+        if (rolledResponses.isEmpty() && liveResponse != null) {
+            return liveResponse;
+        } else if (rolledResponses.isEmpty()) {
+            throw new ResourceNotFoundException("No indices (live or rollup) found during rollup search");
+        }
+
+        return doCombineResponse(liveResponse, rolledResponses, reduceContext);
     }
 
     private static SearchResponse doCombineResponse(SearchResponse liveResponse, List<SearchResponse> rolledResponses,
@@ -242,11 +250,23 @@ public class RollupResponseTranslator {
                 ? (InternalAggregations)liveResponse.getAggregations()
                 : InternalAggregations.EMPTY;
 
-        rolledResponses.forEach(r -> {
-            if (r == null || r.getAggregations() == null || r.getAggregations().asList().size() == 0) {
-                throw new RuntimeException("Expected to find aggregations in rollup response, but none found.");
+        int missingRollupAggs = rolledResponses.stream().mapToInt(searchResponse -> {
+            if (searchResponse == null
+                || searchResponse.getAggregations() == null
+                || searchResponse.getAggregations().asList().size() == 0) {
+                return 1;
             }
-        });
+            return 0;
+        }).sum();
+
+        // We had no rollup aggs, so there is nothing to process
+        if (missingRollupAggs == rolledResponses.size()) {
+            // Return an empty response, but make sure we include all the shard, failure, etc stats
+            return mergeFinalResponse(liveResponse, rolledResponses, InternalAggregations.EMPTY);
+        } else if (missingRollupAggs > 0 && missingRollupAggs != rolledResponses.size()) {
+            // We were missing some but not all the aggs, unclear how to handle this.  Bail.
+            throw new RuntimeException("Expected to find aggregations in rollup response, but none found.");
+        }
 
         // The combination process returns a tree that is identical to the non-rolled
         // which means we can use aggregation's reduce method to combine, just as if
@@ -279,27 +299,39 @@ public class RollupResponseTranslator {
                     new InternalAggregation.ReduceContext(reduceContext.bigArrays(), reduceContext.scriptService(), true));
         }
 
-        // TODO allow profiling in the future
-        InternalSearchResponse combinedInternal = new InternalSearchResponse(SearchHits.empty(), currentTree, null, null,
-                rolledResponses.stream().anyMatch(SearchResponse::isTimedOut),
-                rolledResponses.stream().anyMatch(SearchResponse::isTimedOut),
-                rolledResponses.stream().mapToInt(SearchResponse::getNumReducePhases).sum());
+        return mergeFinalResponse(liveResponse, rolledResponses, currentTree);
+    }
+
+    private static SearchResponse mergeFinalResponse(SearchResponse liveResponse, List<SearchResponse> rolledResponses,
+                                              InternalAggregations aggs) {
 
         int totalShards = rolledResponses.stream().mapToInt(SearchResponse::getTotalShards).sum();
         int sucessfulShards = rolledResponses.stream().mapToInt(SearchResponse::getSuccessfulShards).sum();
         int skippedShards = rolledResponses.stream().mapToInt(SearchResponse::getSkippedShards).sum();
         long took = rolledResponses.stream().mapToLong(r -> r.getTook().getMillis()).sum() ;
 
+        boolean isTimedOut = rolledResponses.stream().anyMatch(SearchResponse::isTimedOut);
+        boolean isTerminatedEarly = rolledResponses.stream()
+            .filter(r -> r.isTerminatedEarly() != null)
+            .anyMatch(SearchResponse::isTerminatedEarly);
+        int numReducePhases = rolledResponses.stream().mapToInt(SearchResponse::getNumReducePhases).sum();
+
         if (liveResponse != null) {
             totalShards += liveResponse.getTotalShards();
             sucessfulShards += liveResponse.getSuccessfulShards();
             skippedShards += liveResponse.getSkippedShards();
             took = Math.max(took, liveResponse.getTook().getMillis());
+            isTimedOut = isTimedOut && liveResponse.isTimedOut();
+            isTerminatedEarly = isTerminatedEarly && liveResponse.isTerminatedEarly();
+            numReducePhases += liveResponse.getNumReducePhases();
         }
+
+        InternalSearchResponse combinedInternal = new InternalSearchResponse(SearchHits.empty(), aggs, null, null,
+            isTimedOut, isTerminatedEarly, numReducePhases);
 
         // Shard failures are ignored atm, so returning an empty array is fine
         return new SearchResponse(combinedInternal, null, totalShards, sucessfulShards, skippedShards,
-                took, ShardSearchFailure.EMPTY_ARRAY, rolledResponses.get(0).getClusters());
+            took, ShardSearchFailure.EMPTY_ARRAY, rolledResponses.get(0).getClusters());
     }
 
     /**
@@ -386,6 +418,7 @@ public class RollupResponseTranslator {
             });
         } else if (rolled instanceof StringTerms) {
             return unrollMultiBucket(rolled, original, currentTree, (bucket, bucketCount, subAggs) -> {
+
                 BytesRef key = new BytesRef(bucket.getKeyAsString().getBytes(StandardCharsets.UTF_8));
                 assert bucketCount >= 0;
                 //TODO expose getFormatter(), keyed upstream in Core

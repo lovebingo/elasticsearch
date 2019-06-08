@@ -22,22 +22,28 @@ public class MachineLearningFeatureSetUsage extends XPackFeatureSet.Usage {
     public static final String DATAFEEDS_FIELD = "datafeeds";
     public static final String COUNT = "count";
     public static final String DETECTORS = "detectors";
+    public static final String FORECASTS = "forecasts";
     public static final String MODEL_SIZE = "model_size";
+    public static final String CREATED_BY = "created_by";
+    public static final String NODE_COUNT = "node_count";
 
     private final Map<String, Object> jobsUsage;
     private final Map<String, Object> datafeedsUsage;
+    private final int nodeCount;
 
     public MachineLearningFeatureSetUsage(boolean available, boolean enabled, Map<String, Object> jobsUsage,
-                                          Map<String, Object> datafeedsUsage) {
+                                          Map<String, Object> datafeedsUsage, int nodeCount) {
         super(XPackField.MACHINE_LEARNING, available, enabled);
         this.jobsUsage = Objects.requireNonNull(jobsUsage);
         this.datafeedsUsage = Objects.requireNonNull(datafeedsUsage);
+        this.nodeCount = nodeCount;
     }
 
     public MachineLearningFeatureSetUsage(StreamInput in) throws IOException {
         super(in);
         this.jobsUsage = in.readMap();
         this.datafeedsUsage = in.readMap();
+        this.nodeCount = in.readInt();
     }
 
     @Override
@@ -45,6 +51,7 @@ public class MachineLearningFeatureSetUsage extends XPackFeatureSet.Usage {
         super.writeTo(out);
         out.writeMap(jobsUsage);
         out.writeMap(datafeedsUsage);
+        out.writeInt(nodeCount);
     }
 
     @Override
@@ -55,6 +62,9 @@ public class MachineLearningFeatureSetUsage extends XPackFeatureSet.Usage {
         }
         if (datafeedsUsage != null) {
             builder.field(DATAFEEDS_FIELD, datafeedsUsage);
+        }
+        if (nodeCount >= 0) {
+            builder.field(NODE_COUNT, nodeCount);
         }
     }
 

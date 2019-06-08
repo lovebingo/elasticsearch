@@ -27,7 +27,7 @@ import java.util.Map;
  * Throws exception is the field is not of type string.
  */
 
-public final class LowercaseProcessor extends AbstractStringProcessor {
+public final class LowercaseProcessor extends AbstractStringProcessor<String> {
 
     public static final String TYPE = "lowercase";
 
@@ -35,9 +35,13 @@ public final class LowercaseProcessor extends AbstractStringProcessor {
         super(processorTag, field, ignoreMissing, targetField);
     }
 
+    public static String apply(String value) {
+        return value.toLowerCase(Locale.ROOT);
+    }
+
     @Override
     protected String process(String value) {
-        return value.toLowerCase(Locale.ROOT);
+        return apply(value);
     }
 
     @Override

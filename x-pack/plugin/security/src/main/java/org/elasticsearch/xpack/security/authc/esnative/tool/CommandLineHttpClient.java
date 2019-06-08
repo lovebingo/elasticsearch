@@ -19,13 +19,14 @@ import org.elasticsearch.env.Environment;
 import org.elasticsearch.xpack.core.XPackSettings;
 import org.elasticsearch.xpack.core.common.socket.SocketAccess;
 import org.elasticsearch.xpack.core.security.authc.support.UsernamePasswordToken;
+import org.elasticsearch.xpack.core.ssl.SSLConfiguration;
 import org.elasticsearch.xpack.core.ssl.SSLService;
 import org.elasticsearch.xpack.security.authc.esnative.tool.HttpResponse.HttpResponseBuilder;
 
+import javax.net.ssl.HttpsURLConnection;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.UncheckedIOException;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URL;
@@ -34,8 +35,6 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Collections;
 import java.util.List;
-
-import javax.net.ssl.HttpsURLConnection;
 
 import static org.elasticsearch.http.HttpTransportSettings.SETTING_HTTP_PORT;
 import static org.elasticsearch.http.HttpTransportSettings.SETTING_HTTP_PUBLISH_HOST;
@@ -86,11 +85,10 @@ public class CommandLineHttpClient {
             final SSLService sslService = new SSLService(settings, env);
             final HttpsURLConnection httpsConn = (HttpsURLConnection) url.openConnection();
             AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-                final Settings sslSettings = SSLService.getHttpTransportSSLSettings(settings);
+                final SSLConfiguration sslConfiguration = sslService.getHttpTransportSSLConfiguration();
                 // Requires permission java.lang.RuntimePermission "setFactory";
-                httpsConn.setSSLSocketFactory(sslService.sslSocketFactory(sslSettings));
-                final boolean isHostnameVerificationEnabled =
-                        sslService.getVerificationMode(sslSettings, Settings.EMPTY).isHostnameVerificationEnabled();
+                httpsConn.setSSLSocketFactory(sslService.sslSocketFactory(sslConfiguration));
+                final boolean isHostnameVerificationEnabled = sslConfiguration.verificationMode().isHostnameVerificationEnabled();
                 if (isHostnameVerificationEnabled == false) {
                     httpsConn.setHostnameVerifier((hostname, session) -> true);
                 }
@@ -138,7 +136,7 @@ public class CommandLineHttpClient {
         final String scheme = XPackSettings.HTTP_SSL_ENABLED.get(settings) ? "https" : "http";
         List<String> httpPublishHost = SETTING_HTTP_PUBLISH_HOST.get(settings);
         if (httpPublishHost.isEmpty()) {
-            httpPublishHost = NetworkService.GLOBAL_NETWORK_PUBLISHHOST_SETTING.get(settings);
+            httpPublishHost = NetworkService.GLOBAL_NETWORK_PUBLISH_HOST_SETTING.get(settings);
         }
 
         // we cannot do custom name resolution here...
@@ -155,13 +153,13 @@ public class CommandLineHttpClient {
                 // this sucks but a port can be specified with a value of 0, we'll never be able to connect to it so just default to
                 // what we know
                 if (port <= 0) {
-                    throw new IllegalStateException("unable to determine http port from settings, please use the -u option to provide the" +
-                            " url");
+                    throw new IllegalStateException("unable to determine http port from settings");
                 }
             }
             return scheme + "://" + InetAddresses.toUriString(publishAddress) + ":" + port;
-        } catch (IOException e) {
-            throw new UncheckedIOException("failed to resolve default URL", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("unable to determine default URL from settings, please use the -u option to explicitly " +
+                "provide the url", e);
         }
     }
 

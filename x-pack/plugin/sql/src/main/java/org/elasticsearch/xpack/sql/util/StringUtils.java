@@ -5,7 +5,7 @@
  */
 package org.elasticsearch.xpack.sql.util;
 
-import org.apache.lucene.search.spell.LevensteinDistance;
+import org.apache.lucene.search.spell.LevenshteinDistance;
 import org.apache.lucene.util.CollectionUtil;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.collect.Tuple;
@@ -16,17 +16,22 @@ import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.xpack.sql.SqlIllegalArgumentException;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 import static java.util.stream.Collectors.toList;
 
-public abstract class StringUtils {
+public final class StringUtils {
+
+    private StringUtils() {}
 
     public static final String EMPTY = "";
     public static final String NEW_LINE = "\n";
     public static final String SQL_WILDCARD = "%";
+
+    private static final String[] INTEGER_ORDINALS = new String[] { "th", "st", "nd", "rd", "th", "th", "th", "th", "th", "th" };
 
     //CamelCase to camel_case
     public static String camelCaseToUnderscore(String string) {
@@ -57,9 +62,32 @@ public abstract class StringUtils {
         }
         return sb.toString().toUpperCase(Locale.ROOT);
     }
+    
+    //CAMEL_CASE to camelCase
+    public static String underscoreToLowerCamelCase(String string) {
+        if (!Strings.hasText(string)) {
+            return EMPTY;
+        }
+        StringBuilder sb = new StringBuilder();
+        String s = string.trim().toLowerCase(Locale.ROOT);
 
-    public static String nullAsEmpty(String string) {
-        return string == null ? EMPTY : string;
+        boolean previousCharWasUnderscore = false;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (ch == '_') {
+                previousCharWasUnderscore = true;
+            }
+            else {
+                if (previousCharWasUnderscore) {
+                    sb.append(Character.toUpperCase(ch));
+                    previousCharWasUnderscore = false;
+                }
+                else {
+                    sb.append(ch);
+                }
+            }
+        }
+        return sb.toString();
     }
 
     // % -> .*
@@ -211,6 +239,34 @@ public abstract class StringUtils {
         return wildcard.toString();
     }
 
+    public static String likeToUnescaped(String pattern, char escape) {
+        StringBuilder wildcard = new StringBuilder(pattern.length());
+
+        boolean escaped = false;
+        for (int i = 0; i < pattern.length(); i++) {
+            char curr = pattern.charAt(i);
+
+            if (escaped == false && curr == escape && escape != 0) {
+                escaped = true;
+            } else {
+                if (escaped == true && (curr == '%' || curr == '_' || curr == escape)) {
+                    wildcard.append(curr);
+                } else {
+                    if (escaped) {
+                        wildcard.append(escape);
+                    }
+                    wildcard.append(curr);
+                }
+                escaped = false;
+            }
+        }
+        // corner-case when the escape char is the last char
+        if (escaped == true) {
+            wildcard.append(escape);
+        }
+        return wildcard.toString();
+    }
+
     public static String toString(SearchSourceBuilder source) {
         try (XContentBuilder builder = XContentFactory.jsonBuilder().prettyPrint().humanReadable(true)) {
             source.toXContent(builder, ToXContent.EMPTY_PARAMS);
@@ -221,7 +277,7 @@ public abstract class StringUtils {
     }
 
     public static List<String> findSimilar(String match, Iterable<String> potentialMatches) {
-        LevensteinDistance ld = new LevensteinDistance();
+        LevenshteinDistance ld = new LevenshteinDistance();
         List<Tuple<Float, String>> scoredMatches = new ArrayList<>();
         for (String potentialMatch : potentialMatches) {
             float distance = ld.getDistance(match, potentialMatch);
@@ -233,5 +289,52 @@ public abstract class StringUtils {
         return scoredMatches.stream()
                 .map(a -> a.v2())
                 .collect(toList());
+    }
+
+    public static double parseDouble(String string) throws SqlIllegalArgumentException {
+        double value;
+        try {
+            value = Double.parseDouble(string);
+        } catch (NumberFormatException nfe) {
+            throw new SqlIllegalArgumentException("Cannot parse number [{}]", string);
+        }
+
+        if (Double.isInfinite(value)) {
+            throw new SqlIllegalArgumentException("Number [{}] is too large", string);
+        }
+        if (Double.isNaN(value)) {
+            throw new SqlIllegalArgumentException("[{}] cannot be parsed as a number (NaN)", string);
+        }
+        return value;
+    }
+
+    public static long parseLong(String string) throws SqlIllegalArgumentException {
+        try {
+            return Long.parseLong(string);
+        } catch (NumberFormatException nfe) {
+            try {
+                BigInteger bi = new BigInteger(string);
+                try {
+                    bi.longValueExact();
+                } catch (ArithmeticException ae) {
+                    throw new SqlIllegalArgumentException("Number [{}] is too large", string);
+                }
+            } catch (NumberFormatException ex) {
+                // parsing fails, go through
+            }
+            throw new SqlIllegalArgumentException("Cannot parse number [{}]", string);
+        }
+    }
+
+    public static String ordinal(int i) {
+        switch (i % 100) {
+            case 11:
+            case 12:
+            case 13:
+                return i + "th";
+            default:
+                return i + INTEGER_ORDINALS[i % 10];
+
+        }
     }
 }

@@ -36,6 +36,13 @@ import java.util.Objects;
 
 import static org.elasticsearch.common.xcontent.ConstructingObjectParser.constructorArg;
 
+
+/**
+ * Response object for {@link RolloverRequest} API
+ *
+ * Note: there is a new class with the same name for the Java HLRC that uses a typeless format.
+ * Any changes done to this class should also go to that client class.
+ */
 public final class RolloverResponse extends ShardsAcknowledgedResponse implements ToXContentObject {
 
     private static final ParseField NEW_INDEX = new ParseField("new_index");
@@ -67,8 +74,8 @@ public final class RolloverResponse extends ShardsAcknowledgedResponse implement
     RolloverResponse() {
     }
 
-    RolloverResponse(String oldIndex, String newIndex, Map<String, Boolean> conditionResults,
-                             boolean dryRun, boolean rolledOver, boolean acknowledged, boolean shardsAcknowledged) {
+    public RolloverResponse(String oldIndex, String newIndex, Map<String, Boolean> conditionResults,
+                            boolean dryRun, boolean rolledOver, boolean acknowledged, boolean shardsAcknowledged) {
         super(acknowledged, shardsAcknowledged);
         this.oldIndex = oldIndex;
         this.newIndex = newIndex;
@@ -124,7 +131,6 @@ public final class RolloverResponse extends ShardsAcknowledgedResponse implement
         }
         dryRun = in.readBoolean();
         rolledOver = in.readBoolean();
-        readAcknowledged(in);
         readShardsAcknowledged(in);
     }
 
@@ -140,7 +146,6 @@ public final class RolloverResponse extends ShardsAcknowledgedResponse implement
         }
         out.writeBoolean(dryRun);
         out.writeBoolean(rolledOver);
-        writeAcknowledged(out);
         writeShardsAcknowledged(out);
     }
 

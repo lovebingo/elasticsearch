@@ -73,9 +73,9 @@ public class HasParentQueryBuilderTests extends AbstractQueryTestCase<HasParentQ
     }
 
     @Override
-    protected Settings indexSettings() {
+    protected Settings createTestIndexSettings() {
         return Settings.builder()
-            .put(super.indexSettings())
+            .put(super.createTestIndexSettings())
             .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
             .build();
     }
@@ -171,10 +171,6 @@ public class HasParentQueryBuilderTests extends AbstractQueryTestCase<HasParentQ
     public void testSerializationBWC() throws IOException {
         for (Version version : VersionUtils.allReleasedVersions()) {
             HasParentQueryBuilder testQuery = createTestQueryBuilder();
-            if (version.before(Version.V_5_2_0) && testQuery.innerHit() != null) {
-                // ignore unmapped for inner_hits has been added on 5.2
-                testQuery.innerHit().setIgnoreUnmapped(false);
-            }
             assertSerialization(testQuery, version);
         }
     }
@@ -183,7 +179,7 @@ public class HasParentQueryBuilderTests extends AbstractQueryTestCase<HasParentQ
         QueryBuilder query = new MatchAllQueryBuilder();
         IllegalArgumentException e = expectThrows(IllegalArgumentException.class,
                 () -> hasParentQuery(null, query, false));
-        assertThat(e.getMessage(), equalTo("[has_parent] requires 'type' field"));
+        assertThat(e.getMessage(), equalTo("[has_parent] requires 'parent_type' field"));
 
         e = expectThrows(IllegalArgumentException.class,
                 () -> hasParentQuery("foo", null, false));
@@ -196,14 +192,10 @@ public class HasParentQueryBuilderTests extends AbstractQueryTestCase<HasParentQ
     }
 
     public void testToQueryInnerQueryType() throws IOException {
-        String[] searchTypes = new String[]{TYPE};
         QueryShardContext shardContext = createShardContext();
-        shardContext.setTypes(searchTypes);
         HasParentQueryBuilder hasParentQueryBuilder = new HasParentQueryBuilder(PARENT_DOC, new IdsQueryBuilder().addIds("id"),
                 false);
         Query query = hasParentQueryBuilder.toQuery(shardContext);
-        //verify that the context types are still the same as the ones we previously set
-        assertThat(shardContext.getTypes(), equalTo(searchTypes));
         HasChildQueryBuilderTests.assertLateParsingQuery(query, PARENT_DOC, "id");
     }
 
@@ -271,5 +263,13 @@ public class HasParentQueryBuilderTests extends AbstractQueryTestCase<HasParentQ
         Query query = queryBuilder.rewrite(queryShardContext).toQuery(queryShardContext);
         assertThat(query, notNullValue());
         assertThat(query, instanceOf(MatchNoDocsQuery.class));
+    }
+
+    public void testExtractInnerHitBuildersWithDuplicate() {
+        final HasParentQueryBuilder queryBuilder
+            = new HasParentQueryBuilder(CHILD_DOC, new WrapperQueryBuilder(new MatchAllQueryBuilder().toString()), false);
+        queryBuilder.innerHit(new InnerHitBuilder("some_name"));
+        IllegalArgumentException e = expectThrows(IllegalArgumentException.class,
+            () -> InnerHitContextBuilder.extractInnerHits(queryBuilder, Collections.singletonMap("some_name", null)));
     }
 }

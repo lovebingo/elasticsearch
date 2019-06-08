@@ -69,7 +69,7 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
      */
     @BeforeClass
     public static void init() {
-        SearchModule searchModule = new SearchModule(Settings.EMPTY, false, emptyList());
+        SearchModule searchModule = new SearchModule(Settings.EMPTY, emptyList());
         namedWriteableRegistry = new NamedWriteableRegistry(searchModule.getNamedWriteables());
         xContentRegistry = new NamedXContentRegistry(searchModule.getNamedXContents());
     }
@@ -140,14 +140,15 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
             xContentBuilder.endObject();
 
             XContentBuilder shuffled = shuffleXContent(xContentBuilder, shuffleProtectedFields());
-            XContentParser parser = createParser(shuffled);
-            // we need to skip the start object and the name, those will be parsed by outer SuggestBuilder
-            parser.nextToken();
+            try (XContentParser parser = createParser(shuffled)) {
+                // we need to skip the start object and the name, those will be parsed by outer SuggestBuilder
+                parser.nextToken();
 
-            SuggestionBuilder<?> secondSuggestionBuilder = SuggestionBuilder.fromXContent(parser);
-            assertNotSame(suggestionBuilder, secondSuggestionBuilder);
-            assertEquals(suggestionBuilder, secondSuggestionBuilder);
-            assertEquals(suggestionBuilder.hashCode(), secondSuggestionBuilder.hashCode());
+                SuggestionBuilder<?> secondSuggestionBuilder = SuggestionBuilder.fromXContent(parser);
+                assertNotSame(suggestionBuilder, secondSuggestionBuilder);
+                assertEquals(suggestionBuilder, secondSuggestionBuilder);
+                assertEquals(suggestionBuilder.hashCode(), secondSuggestionBuilder.hashCode());
+            }
         }
     }
 
@@ -159,7 +160,7 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
                     indexSettings);
             MapperService mapperService = mock(MapperService.class);
             ScriptService scriptService = mock(ScriptService.class);
-            MappedFieldType fieldType = mockFieldType();
+            MappedFieldType fieldType = mockFieldType(suggestionBuilder.field());
             boolean fieldTypeSearchAnalyzerSet = randomBoolean();
             if (fieldTypeSearchAnalyzerSet) {
                 NamedAnalyzer searchAnalyzer = new NamedAnalyzer("fieldSearchAnalyzer", AnalyzerScope.INDEX, new SimpleAnalyzer());
@@ -177,8 +178,8 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
                     invocation -> new NamedAnalyzer((String) invocation.getArguments()[0], AnalyzerScope.INDEX, new SimpleAnalyzer()));
             when(scriptService.compile(any(Script.class), any())).then(invocation -> new TestTemplateService.MockTemplateScript.Factory(
                     ((Script) invocation.getArguments()[0]).getIdOrCode()));
-            QueryShardContext mockShardContext = new QueryShardContext(0, idxSettings, null, null, mapperService, null, scriptService,
-                    xContentRegistry(), namedWriteableRegistry, null, null, System::currentTimeMillis, null);
+            QueryShardContext mockShardContext = new QueryShardContext(0, idxSettings, null, null, null, mapperService, null,
+                    scriptService, xContentRegistry(), namedWriteableRegistry, null, null, System::currentTimeMillis, null);
 
             SuggestionContext suggestionContext = suggestionBuilder.build(mockShardContext);
             assertEquals(toBytesRef(suggestionBuilder.text()), suggestionContext.getText());
@@ -210,8 +211,10 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
      */
     protected abstract void assertSuggestionContext(SB builder, SuggestionContext context) throws IOException;
 
-    protected MappedFieldType mockFieldType() {
-        return mock(MappedFieldType.class);
+    protected MappedFieldType mockFieldType(String fieldName) {
+        MappedFieldType fieldType = mock(MappedFieldType.class);
+        when(fieldType.name()).thenReturn(fieldName);
+        return fieldType;
     }
 
     /**

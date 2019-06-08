@@ -42,7 +42,6 @@ import org.apache.hadoop.fs.permission.FsAction;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hdfs.MiniDFSNNTopology;
-import org.apache.hadoop.hdfs.client.HdfsClientConfigKeys;
 import org.apache.hadoop.hdfs.server.namenode.ha.HATestUtil;
 import org.apache.hadoop.security.UserGroupInformation;
 
@@ -99,7 +98,6 @@ public class MiniHDFS {
 
         UserGroupInformation.setConfiguration(cfg);
 
-        // TODO: remove hardcoded port!
         MiniDFSCluster.Builder builder = new MiniDFSCluster.Builder(cfg);
         if (secure) {
             builder.nameNodePort(9998);

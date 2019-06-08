@@ -9,10 +9,9 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.GroupedActionListener;
 import org.elasticsearch.action.support.HandledTransportAction;
-import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.threadpool.ThreadPool;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.core.security.action.user.GetUsersAction;
 import org.elasticsearch.xpack.core.security.action.user.GetUsersRequest;
@@ -33,21 +32,21 @@ import java.util.stream.Collectors;
 
 public class TransportGetUsersAction extends HandledTransportAction<GetUsersRequest, GetUsersResponse> {
 
+    private final Settings settings;
     private final NativeUsersStore usersStore;
     private final ReservedRealm reservedRealm;
 
     @Inject
-    public TransportGetUsersAction(Settings settings, ThreadPool threadPool, ActionFilters actionFilters,
-                                   IndexNameExpressionResolver indexNameExpressionResolver, NativeUsersStore usersStore,
-                                   TransportService transportService, ReservedRealm reservedRealm) {
-        super(settings, GetUsersAction.NAME, threadPool, transportService, actionFilters, indexNameExpressionResolver,
-                GetUsersRequest::new);
+    public TransportGetUsersAction(Settings settings, ActionFilters actionFilters,
+                                   NativeUsersStore usersStore, TransportService transportService, ReservedRealm reservedRealm) {
+        super(GetUsersAction.NAME, transportService, actionFilters, GetUsersRequest::new);
+        this.settings = settings;
         this.usersStore = usersStore;
         this.reservedRealm = reservedRealm;
     }
 
     @Override
-    protected void doExecute(final GetUsersRequest request, final ActionListener<GetUsersResponse> listener) {
+    protected void doExecute(Task task, final GetUsersRequest request, final ActionListener<GetUsersResponse> listener) {
         final String[] requestedUsers = request.usernames();
         final boolean specificUsersRequested = requestedUsers != null && requestedUsers.length > 0;
         final List<String> usersToSearchFor = new ArrayList<>();
@@ -71,7 +70,7 @@ public class TransportGetUsersAction extends HandledTransportAction<GetUsersRequ
                 listener.onResponse(new GetUsersResponse(users));
             }, listener::onFailure);
         final GroupedActionListener<Collection<User>> groupListener =
-                new GroupedActionListener<>(sendingListener, 2, Collections.emptyList());
+                new GroupedActionListener<>(sendingListener, 2);
         // We have two sources for the users object, the reservedRealm and the usersStore, we query both at the same time with a
         // GroupedActionListener
         if (realmLookup.isEmpty()) {
@@ -85,8 +84,7 @@ public class TransportGetUsersAction extends HandledTransportAction<GetUsersRequ
         } else {
             // nested group listener action here - for each of the users we got and fetch it concurrently - once we are done we notify
             // the "global" group listener.
-            GroupedActionListener<User> realmGroupListener = new GroupedActionListener<>(groupListener, realmLookup.size(),
-                    Collections.emptyList());
+            GroupedActionListener<User> realmGroupListener = new GroupedActionListener<>(groupListener, realmLookup.size());
             for (String user : realmLookup) {
                 reservedRealm.lookupUser(user, realmGroupListener);
             }

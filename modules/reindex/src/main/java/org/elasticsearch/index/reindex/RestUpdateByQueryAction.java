@@ -20,7 +20,6 @@
 package org.elasticsearch.index.reindex;
 
 import org.elasticsearch.ElasticsearchParseException;
-import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.client.node.NodeClient;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.LoggingDeprecationHandler;
@@ -43,7 +42,6 @@ public class RestUpdateByQueryAction extends AbstractBulkByQueryRestHandler<Upda
     public RestUpdateByQueryAction(Settings settings, RestController controller) {
         super(settings, UpdateByQueryAction.INSTANCE);
         controller.registerHandler(POST, "/{index}/_update_by_query", this);
-        controller.registerHandler(POST, "/{index}/{type}/_update_by_query", this);
     }
 
     @Override
@@ -57,18 +55,18 @@ public class RestUpdateByQueryAction extends AbstractBulkByQueryRestHandler<Upda
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     protected UpdateByQueryRequest buildRequest(RestRequest request) throws IOException {
         /*
          * Passing the search request through UpdateByQueryRequest first allows
          * it to set its own defaults which differ from SearchRequest's
          * defaults. Then the parse can override them.
          */
-        UpdateByQueryRequest internal = new UpdateByQueryRequest(new SearchRequest());
+        UpdateByQueryRequest internal = new UpdateByQueryRequest();
 
         Map<String, Consumer<Object>> consumers = new HashMap<>();
         consumers.put("conflicts", o -> internal.setConflicts((String) o));
         consumers.put("script", o -> internal.setScript(parseScript(o)));
+        consumers.put("max_docs", s -> setMaxDocsValidateIdentical(internal, ((Number) s).intValue()));
 
         parseInternalRequest(internal, request, consumers);
 
